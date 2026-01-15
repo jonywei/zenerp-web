@@ -1,0 +1,146 @@
+{% extends 'base.html' %}
+
+{% block title %}个人中心{% endblock %}
+
+{% block content %}
+<div class="max-w-2xl mx-auto space-y-6">
+    
+    <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-8 flex flex-col md:flex-row items-center gap-6">
+        <div class="w-20 h-20 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center text-3xl font-black shadow-inner">
+            {{ request.user.username|slice:":1"|upper }}
+        </div>
+        
+        <div class="text-center md:text-left flex-1">
+            <h2 class="text-2xl font-bold text-gray-800 mb-1 flex items-center justify-center md:justify-start gap-2">
+                {{ request.user.username }}
+                
+                {% if request.user.is_superuser %}
+                    <span class="bg-black text-white text-xs px-2 py-1 rounded">超级管理员</span>
+                {% elif request.user.role == 'ADMIN' %}
+                    <span class="bg-yellow-100 text-yellow-700 text-xs px-2 py-1 rounded font-bold">👑 公司老板</span>
+                {% else %}
+                    <span class="bg-blue-100 text-blue-700 text-xs px-2 py-1 rounded">💼 销售人员</span>
+                {% endif %}
+            </h2>
+            <p class="text-gray-500 text-sm mt-1">
+                <span class="bg-gray-100 px-2 py-0.5 rounded text-xs">ID: {{ request.user.id }}</span>
+                <span class="ml-2">加入时间: {{ request.user.date_joined|date:"Y-m-d" }}</span>
+            </p>
+            {% if request.user.tenant %}
+            <p class="text-indigo-600 text-sm font-bold mt-2">🏢 {{ request.user.tenant.name }}</p>
+            {% endif %}
+        </div>
+
+        {% if request.user.is_superuser %}
+        <a href="/admin/" target="_blank" class="bg-gray-800 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-gray-900 transition flex items-center gap-2 shadow-lg">
+            ⚙️ 系统后台
+        </a>
+        {% endif %}
+    </div>
+
+    <div class="grid grid-cols-2 gap-4">
+        <div class="bg-gradient-to-br from-blue-600 to-blue-700 text-white p-6 rounded-2xl shadow-lg relative overflow-hidden">
+            <p class="text-blue-100 text-xs font-bold mb-1 relative z-10">本月个人销售额</p>
+            <p class="text-3xl font-black relative z-10" id="mySales">¥0.00</p>
+            <div class="absolute -right-4 -bottom-4 w-24 h-24 bg-white/10 rounded-full blur-xl"></div>
+        </div>
+        <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+            <p class="text-gray-400 text-xs font-bold mb-1">本月个人毛利贡献</p>
+            <p class="text-3xl font-black text-gray-800" id="myProfit">¥0.00</p>
+        </div>
+    </div>
+
+    <div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+        <div class="px-6 py-4 border-b border-gray-50 bg-gray-50/50">
+            <h3 class="font-bold text-gray-800">账户操作</h3>
+        </div>
+        <div class="divide-y divide-gray-50">
+            
+            {% if request.user.role == 'ADMIN' %}
+            <a href="/company/" class="p-4 px-6 flex justify-between items-center hover:bg-indigo-50 transition group">
+                <div class="flex items-center gap-3">
+                    <span class="p-2 bg-indigo-50 text-indigo-600 rounded-lg group-hover:bg-indigo-100">🏢</span>
+                    <span class="font-medium text-gray-700">公司信息设置</span>
+                </div>
+                <span class="text-gray-300 font-mono text-lg">›</span>
+            </a>
+            <a href="/staff/" class="p-4 px-6 flex justify-between items-center hover:bg-purple-50 transition group">
+                <div class="flex items-center gap-3">
+                    <span class="p-2 bg-purple-50 text-purple-600 rounded-lg group-hover:bg-purple-100">👥</span>
+                    <span class="font-medium text-gray-700">员工账号管理</span>
+                </div>
+                <span class="text-gray-300 font-mono text-lg">›</span>
+            </a>
+            {% endif %}
+
+            <div class="p-4 px-6 flex justify-between items-center hover:bg-yellow-50 transition cursor-pointer group" onclick="showPwdModal()">
+                <div class="flex items-center gap-3">
+                    <span class="p-2 bg-yellow-50 text-yellow-600 rounded-lg group-hover:bg-yellow-100">🔑</span>
+                    <span class="font-medium text-gray-700">修改登录密码</span>
+                </div>
+                <span class="text-gray-300 font-mono text-lg">›</span>
+            </div>
+            
+            <div class="p-4 px-6 flex justify-between items-center hover:bg-red-50 transition cursor-pointer group" onclick="logout()">
+                <div class="flex items-center gap-3">
+                    <span class="p-2 bg-red-50 text-red-600 rounded-lg group-hover:bg-red-100">🚪</span>
+                    <span class="font-medium text-red-600">退出登录</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="pwdModal" class="fixed inset-0 bg-black bg-opacity-50 hidden z-50 flex items-center justify-center p-4">
+    <div class="bg-white p-6 rounded-xl w-full max-w-sm shadow-2xl transform transition-all scale-100">
+        <h3 class="font-bold text-lg mb-4 text-gray-800">修改密码</h3>
+        <input type="password" id="newPwd" class="w-full border rounded-lg h-12 px-4 mb-4 focus:ring-2 focus:ring-blue-500 outline-none" placeholder="输入新密码 (至少6位)">
+        <div class="flex justify-end gap-3">
+            <button onclick="document.getElementById('pwdModal').classList.add('hidden')" class="px-4 py-2 bg-gray-100 rounded-lg text-sm font-bold text-gray-600 hover:bg-gray-200">取消</button>
+            <button onclick="changePwd()" class="px-6 py-2 bg-blue-600 text-white rounded-lg text-sm font-bold hover:bg-blue-700 shadow-lg">确认修改</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    const currentUserId = "{{ request.user.id }}";
+
+    async function loadMyPerformance() {
+        const now = new Date();
+        const start = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`;
+        const end = now.toISOString().split('T')[0];
+        try {
+            const url = `/api/analysis/profit_dashboard/?start_date=${start}&end_date=${end}&staff_id=${currentUserId}&t=${Date.now()}`;
+            const res = await axios.get(url);
+            
+            // 🟢 防呆处理，防止 NaN
+            const summary = res.data.summary || { sales: 0, profit: 0 };
+            document.getElementById('mySales').innerText = '¥' + parseFloat(summary.sales || 0).toLocaleString('zh-CN', {minimumFractionDigits: 2});
+            document.getElementById('myProfit').innerText = '¥' + parseFloat(summary.profit || 0).toLocaleString('zh-CN', {minimumFractionDigits: 2});
+        } catch (e) {
+            document.getElementById('mySales').innerText = '¥0.00';
+            document.getElementById('myProfit').innerText = '¥0.00';
+        }
+    }
+
+    window.showPwdModal = () => document.getElementById('pwdModal').classList.remove('hidden');
+    
+    async function changePwd() {
+        const pwd = document.getElementById('newPwd').value;
+        if (!pwd || pwd.length < 6) return alert("密码太短，至少6位");
+        try {
+            await axios.post('/api/change_password/', { password: pwd });
+            alert("✅ 密码修改成功，请重新登录");
+            location.href = '/login/';
+        } catch (e) { alert("修改失败"); }
+    }
+
+    async function logout() {
+        if(!confirm('确定要退出登录吗？')) return;
+        try { await axios.get('/api/logout/'); } catch(e){}
+        window.location.href = '/login/';
+    }
+
+    loadMyPerformance();
+</script>
+{% endblock %}

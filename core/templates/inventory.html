@@ -1,0 +1,153 @@
+{% extends 'base.html' %}
+{% block title %}库存管理{% endblock %}
+{% block content %}
+<div class="flex flex-col md:flex-row justify-between items-center mb-6 gap-4">
+    <h1 class="text-2xl font-bold text-gray-800 border-l-4 border-orange-500 pl-3">库存清单</h1>
+    <div class="flex gap-2 w-full md:w-auto">
+        <select id="statusFilter" class="border rounded px-3 py-2 text-sm bg-white font-bold text-blue-600" onchange="loadData()">
+            <option value="ALL">📦 全部资产 (在库+外借)</option>
+            <option value="IN_STOCK">🏠 仅看在库</option>
+            <option value="RENTED">🚚 仅看外借/在租</option>
+        </select>
+        <select id="catFilter" class="border rounded px-3 py-2 text-sm bg-white" onchange="filterList()">
+            <option value="">📂 全部分类</option>
+            <option value="ZJ">🖥️ 整机</option>
+            <option value="XS">📺 显示器</option>
+            <option value="SJ">🔌 散件</option>
+            <option value="ZX">📦 杂项</option>
+        </select>
+        <input type="text" id="searchInput" placeholder="搜索型号/编码..." class="border rounded px-3 py-2 text-sm w-full md:w-64" oninput="filterList()">
+        <a href="/entry/" class="bg-green-600 text-white px-4 py-2 rounded text-sm font-bold hover:bg-green-700 whitespace-nowrap">+ 入库</a>
+    </div>
+</div>
+
+<div class="bg-white rounded-xl shadow-sm overflow-hidden">
+    <div class="overflow-x-auto">
+        <table class="w-full text-left text-sm whitespace-nowrap">
+            <thead class="bg-gray-50 text-gray-500 border-b">
+                <tr>
+                    <th class="px-6 py-3">图片</th>
+                    <th class="px-6 py-3">状态/预警</th>
+                    <th class="px-6 py-3">商品名称 / 配置</th>
+                    <th class="px-6 py-3">成本</th>
+                    <th class="px-6 py-3">入库时间</th>
+                </tr>
+            </thead>
+            <tbody id="tbody" class="divide-y divide-gray-50">
+                <tr><td colspan="5" class="px-6 py-8 text-center text-gray-400">加载中...</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div id="flowModal" class="fixed inset-0 bg-black bg-opacity-50 hidden z-50 flex items-center justify-center">
+    <div class="bg-white rounded-xl w-full max-w-lg p-6 m-4 shadow-2xl">
+        <h3 class="font-bold text-lg mb-4 text-gray-800">📦 资产流转记录</h3>
+        <div id="flowContent" class="space-y-4 max-h-[60vh] overflow-y-auto"></div>
+        <button onclick="document.getElementById('flowModal').classList.add('hidden')" class="mt-6 w-full py-2 bg-gray-100 rounded text-gray-600 font-bold">关闭</button>
+    </div>
+</div>
+
+<script>
+    let allData = [];
+    const catMap = { 'ZJ': '整机', 'XS': '显示器', 'SJ': '散件', 'ZX': '杂项' };
+    const statusMap = { 'IN_STOCK': '在库', 'RENTED': '在租', 'TRANSIT': '中转', 'SOLD': '已售' };
+    
+    // 🟢 颜色逻辑对应
+    const colorClass = {
+        'green': 'bg-green-100 text-green-700 border-green-200',
+        'yellow': 'bg-yellow-100 text-yellow-700 border-yellow-200',
+        'red': 'bg-red-100 text-red-700 border-red-200'
+    };
+
+    async function loadData() {
+        const status = document.getElementById('statusFilter').value;
+        try {
+            // 🟢 默认查全部
+            const res = await axios.get(`/api/products/?status=${status}&page_size=1000&t=` + Date.now());
+            allData = res.data.results || res.data;
+            renderList(allData);
+        } catch (err) {
+            document.getElementById('tbody').innerHTML = '<tr><td colspan="5" class="text-center py-4 text-red-500">加载失败</td></tr>';
+        }
+    }
+
+    function renderList(list) {
+        const tbody = document.getElementById('tbody');
+        if (list.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="5" class="text-center py-10 text-gray-400">暂无数据</td></tr>';
+            return;
+        }
+        tbody.innerHTML = list.map(item => {
+            const badgeClass = colorClass[item.color_tag] || 'bg-gray-100 text-gray-600';
+            const statusText = statusMap[item.status] || item.status;
+            const imgSrc = item.image ? item.image : 'https://via.placeholder.com/100x100?text=No+Img';
+            
+            return `
+            <tr class="hover:bg-gray-50 transition cursor-pointer" onclick="showFlow(${item.id})">
+                <td class="px-6 py-4">
+                    <div class="w-12 h-12 bg-gray-100 rounded overflow-hidden border border-gray-200">
+                        <img src="${imgSrc}" class="w-full h-full object-cover">
+                    </div>
+                </td>
+                <td class="px-6 py-4">
+                    <span class="px-2 py-1 rounded text-xs border font-bold ${badgeClass}">${statusText}</span>
+                    <div class="font-mono text-xs text-gray-400 mt-1">${item.zencode}</div>
+                </td>
+                <td class="px-6 py-4">
+                    <div class="font-bold text-gray-800 text-base">${item.name}</div>
+                    <div class="text-xs text-gray-500 mt-1 truncate max-w-xs">${item.cpu || ''} ${item.gpu || ''} ${item.ram || ''}</div>
+                </td>
+                <td class="px-6 py-4 font-bold text-orange-600">¥${parseFloat(item.cost_price).toLocaleString()}</td>
+                <td class="px-6 py-4 text-gray-400 text-xs">${item.created_at.split('T')[0]}</td>
+            </tr>
+            `;
+        }).join('');
+    }
+
+    async function showFlow(id) {
+        const item = allData.find(i => i.id === id);
+        if(!item) return;
+        
+        const flowDiv = document.getElementById('flowContent');
+        flowDiv.innerHTML = '<p class="text-center text-gray-400">加载中...</p>';
+        document.getElementById('flowModal').classList.remove('hidden');
+        
+        try {
+            // 🟢 前端直接利用已有的数据 (如果后端已在list返回flow) 或重新请求
+            // 这里为了保险，我们可以请求详情或者直接解析
+            // 如果列表接口没带flow_history，需要请求详情:
+            const res = await axios.get(`/api/products/${id}/`);
+            const flow = res.data.flow_history;
+            
+            if(!flow || flow.length === 0) {
+                flowDiv.innerHTML = '<p class="text-center text-gray-400">暂无流转记录</p>';
+                return;
+            }
+            
+            flowDiv.innerHTML = flow.map((f, i) => `
+                <div class="flex gap-3 relative pb-4 ${i===flow.length-1?'':'border-l-2 border-gray-100 ml-2'}">
+                    <div class="w-4 h-4 rounded-full bg-blue-500 -ml-[9px] mt-1 border-2 border-white ring-2 ring-blue-100"></div>
+                    <div>
+                        <p class="text-xs text-gray-400">${f.date} <span class="ml-2 font-bold text-gray-600">${f.operator}</span></p>
+                        <p class="font-bold text-gray-800 mt-1">${f.type}</p>
+                        <p class="text-sm text-gray-500 bg-gray-50 p-2 rounded mt-1">${f.desc}</p>
+                    </div>
+                </div>
+            `).join('');
+            
+        } catch(e) { flowDiv.innerHTML = '<p class="text-red-500 text-center">加载失败</p>'; }
+    }
+
+    function filterList() {
+        const keyword = document.getElementById('searchInput').value.toLowerCase();
+        const cat = document.getElementById('catFilter').value;
+        const filtered = allData.filter(i => {
+            return ((i.name && i.name.toLowerCase().includes(keyword)) || (i.zencode && i.zencode.toLowerCase().includes(keyword))) && (cat === '' || i.category === cat);
+        });
+        renderList(filtered);
+    }
+
+    loadData();
+</script>
+{% endblock %}

@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>登录 - ZenERP</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+</head>
+<body class="bg-gray-100 h-screen flex items-center justify-center p-4">
+    <div class="flex w-full max-w-4xl bg-white rounded-2xl shadow-2xl overflow-hidden h-[500px]">
+        <div class="hidden md:flex w-1/2 bg-blue-600 flex-col items-center justify-center text-white p-8">
+            <h1 class="text-5xl font-black mb-2">ZenERP</h1>
+            <p class="text-blue-100 text-lg tracking-widest">商业资产核算核心</p>
+        </div>
+        <div class="w-full md:w-1/2 p-8 md:p-12 flex flex-col justify-center relative">
+            <h2 class="text-2xl font-bold text-gray-800 mb-1">欢迎回来</h2>
+            <div class="space-y-5">
+                <input type="text" id="username" class="w-full h-12 border border-gray-300 rounded-lg px-4" placeholder="账号">
+                <input type="password" id="password" class="w-full h-12 border border-gray-300 rounded-lg px-4" placeholder="密码">
+                <button onclick="doLogin()" class="w-full h-12 bg-blue-600 text-white rounded-lg font-bold text-lg">登录</button>
+            </div>
+            <div class="mt-6 text-center border-t border-gray-100 pt-4">
+                <a href="/register/" class="text-blue-600 font-bold hover:underline">👉 注册新公司/团队</a>
+            </div>
+        </div>
+    </div>
+    <script>
+        async function doLogin() {
+            try {
+                const res = await axios.post('/api/login/', { username: document.getElementById('username').value, password: document.getElementById('password').value });
+                if(res.data.status === 'ok') location.href = '/'; else alert(res.data.msg);
+            } catch(e) { alert('网络错误'); }
+        }
+    </script>
+</body>
+</html>

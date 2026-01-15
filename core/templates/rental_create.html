@@ -1,0 +1,150 @@
+{% extends 'base.html' %}
+{% block title %}新建租赁{% endblock %}
+{% block content %}
+<div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+    <div class="p-6 border-b border-gray-100 bg-gray-50 flex justify-between items-center">
+        <h2 class="text-lg font-bold text-gray-800">租赁开单 (Pro)</h2>
+        <span class="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded font-bold" id="profitBadge">预计毛利: ¥0</span>
+    </div>
+    <form class="p-6 space-y-6">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div>
+                <label class="block text-sm font-bold text-gray-700 mb-2">承租客户</label>
+                <div class="flex gap-2">
+                    <select id="contact_id" class="w-full h-12 border-gray-300 rounded-lg px-3 bg-white"><option>加载中...</option></select>
+                    <button type="button" onclick="showAddModal()" class="w-12 h-12 bg-blue-100 text-blue-600 rounded-lg font-bold">+</button>
+                </div>
+            </div>
+            <div>
+                <label class="block text-sm font-bold text-gray-700 mb-2">租赁设备</label>
+                <select id="product_id" class="w-full h-12 border-gray-300 rounded-lg px-3 bg-white"><option>加载中...</option></select>
+            </div>
+        </div>
+        
+        <div class="bg-orange-50 p-5 rounded-xl border border-orange-100 grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div><label class="block text-xs font-medium text-gray-600 mb-1">起租日期</label><input type="date" id="start_date" class="w-full h-10 border rounded px-3 bg-white"></div>
+            <div><label class="block text-xs font-medium text-gray-600 mb-1">租期 (月)</label><input type="number" id="duration" value="12" class="w-full h-10 border rounded px-3 font-bold" oninput="calc()"></div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">押金 (¥)</label>
+                <input type="number" id="deposit" placeholder="0" class="w-full h-10 border rounded px-3" oninput="calc()">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">租金 (¥/月)</label>
+                <input type="number" id="rent_price" class="w-full h-10 border rounded px-3 font-bold text-blue-600" oninput="calc()">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">月折旧 (¥)</label>
+                <input type="number" id="depreciation" placeholder="0" class="w-full h-10 border rounded px-3 text-red-500" oninput="calc()">
+            </div>
+        </div>
+        
+        <div class="border-t border-gray-100 pt-6">
+            <label class="block text-sm font-bold text-gray-800 mb-2">首期付款 (含押金)</label>
+            <div class="flex gap-4 items-center">
+                <input type="number" id="first_payment" class="w-full md:w-1/3 h-12 border-2 border-green-500 rounded-xl px-4 font-bold text-lg text-green-700" placeholder="自动计算">
+                <div class="text-xs text-gray-400">系统已自动计算：押金 + 1个月租金</div>
+            </div>
+        </div>
+
+        <button type="button" onclick="submitForm()" class="w-full bg-blue-600 text-white py-3 rounded-xl font-bold hover:bg-blue-700 shadow-lg mt-4">确认开单 (自动挂账)</button>
+    </form>
+</div>
+
+<div id="addModal" class="fixed inset-0 bg-black bg-opacity-50 hidden z-50 flex items-center justify-center">
+    <div class="bg-white p-6 rounded-lg w-80 shadow-xl">
+        <h3 class="font-bold mb-4">新增客户</h3>
+        <input id="newCName" class="w-full border rounded h-10 px-3 mb-3" placeholder="姓名">
+        <input id="newCPhone" class="w-full border rounded h-10 px-3 mb-3" placeholder="电话">
+        <input id="newCAddr" class="w-full border rounded h-10 px-3 mb-4" placeholder="地址/备注">
+        <div class="flex justify-end gap-2">
+            <button onclick="document.getElementById('addModal').classList.add('hidden')" class="px-4 py-2 bg-gray-100 rounded">取消</button>
+            <button onclick="addC()" class="px-4 py-2 bg-blue-600 text-white rounded">保存</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    document.getElementById('start_date').value = new Date().toISOString().split('T')[0];
+    
+    async function init() {
+        try {
+            const [c, p] = await Promise.all([
+                axios.get('/api/contacts/?page_size=1000&t='+Date.now()),
+                axios.get('/api/products/?status=IN_STOCK&page_size=1000&t='+Date.now())
+            ]);
+            document.getElementById('contact_id').innerHTML = '<option value="">请选择...</option>' + (c.data.results||c.data).map(i=>`<option value="${i.id}">${i.name}</option>`).join('');
+            document.getElementById('product_id').innerHTML = '<option value="">请选择...</option>' + (p.data.results||p.data).map(i=>`<option value="${i.id}">[${i.zencode}] ${i.name} (¥${i.cost_price})</option>`).join('');
+        } catch(e) { alert('数据加载失败'); }
+    }
+    init();
+
+    window.showAddModal = () => document.getElementById('addModal').classList.remove('hidden');
+    
+    async function addC() {
+        try {
+            const res = await axios.post('/api/contacts/', { 
+                name: document.getElementById('newCName').value, 
+                phone: document.getElementById('newCPhone').value,
+                address: document.getElementById('newCAddr').value
+            });
+            const sel = document.getElementById('contact_id');
+            const opt = document.createElement('option');
+            opt.value = res.data.id; opt.text = res.data.name; opt.selected = true;
+            sel.appendChild(opt);
+            document.getElementById('addModal').classList.add('hidden');
+        } catch(e) { alert('添加失败'); }
+    }
+
+    // 核心：联动计算逻辑
+    function calc() {
+        const dur = parseFloat(document.getElementById('duration').value) || 0;
+        const rent = parseFloat(document.getElementById('rent_price').value) || 0;
+        const dep = parseFloat(document.getElementById('deposit').value) || 0;
+        const depr = parseFloat(document.getElementById('depreciation').value) || 0;
+        
+        // 1. 自动填首付 (押金 + 1个月租金)
+        const autoFirst = dep + rent;
+        document.getElementById('first_payment').placeholder = `建议: ¥${autoFirst}`;
+        // 如果用户没手动输过，或者想重置，可以在这里赋值，为了体验暂不强制覆盖值，只改placeholder
+        
+        // 2. 算利润
+        const totalRev = rent * dur;
+        const totalCost = depr * dur;
+        const profit = totalRev - totalCost;
+        
+        const badge = document.getElementById('profitBadge');
+        badge.innerText = `预计毛利: ¥${profit.toLocaleString()}`;
+        badge.className = profit >= 0 ? "text-xs bg-green-100 text-green-700 px-2 py-1 rounded font-bold" : "text-xs bg-red-100 text-red-700 px-2 py-1 rounded font-bold";
+    }
+
+    async function submitForm() {
+        // 获取首付，如果没填就用 placeholder 里的建议值（这里逻辑是必须填或默认按建议算）
+        let fp = document.getElementById('first_payment').value;
+        const dep = parseFloat(document.getElementById('deposit').value) || 0;
+        const rent = parseFloat(document.getElementById('rent_price').value) || 0;
+        if (!fp) fp = dep + rent; // 默认逻辑
+        
+        const data = {
+            contact_id: document.getElementById('contact_id').value,
+            product_id: document.getElementById('product_id').value,
+            start_date: document.getElementById('start_date').value,
+            duration: document.getElementById('duration').value,
+            deposit: dep,
+            rent_price: rent,
+            depreciation_monthly: document.getElementById('depreciation').value || 0,
+            first_payment: fp // 传给后端
+        };
+        
+        if(!data.contact_id || !data.product_id) return alert('请选择客户和设备');
+        
+        try {
+            await axios.post('/api/rentals/create_lease/', data);
+            alert('开单成功！已自动挂账并核销首付款。'); 
+            window.location.href='/rental/';
+        } catch(e) { alert('失败: ' + (e.response?.data?.error || e.message)); }
+    }
+</script>
+{% endblock %}

@@ -1,0 +1,126 @@
+{% extends 'base.html' %}
+{% block title %}利润战报{% endblock %}
+{% block content %}
+<div class="bg-white rounded-xl shadow-sm p-6 mb-6 border border-gray-100">
+    <div class="flex flex-col md:flex-row md:items-end gap-4">
+        <div><label class="block text-xs font-bold text-gray-500 mb-1">开始日期</label><input type="date" id="startDate" class="border rounded-lg px-3 py-2 text-sm w-full outline-none focus:ring-2 focus:ring-blue-500"></div>
+        <div><label class="block text-xs font-bold text-gray-500 mb-1">结束日期</label><input type="date" id="endDate" class="border rounded-lg px-3 py-2 text-sm w-full outline-none focus:ring-2 focus:ring-blue-500"></div>
+        <div class="flex-1"><label class="block text-xs font-bold text-gray-500 mb-1">销售人员</label><select id="staffSelect" class="border rounded-lg px-3 py-2 text-sm w-full bg-gray-50 outline-none focus:ring-2 focus:ring-blue-500"><option value="">全部销售员</option></select></div>
+        <button onclick="loadData()" class="bg-blue-600 text-white px-6 py-2.5 rounded-lg font-bold text-sm hover:bg-blue-700 transition shadow-sm">查询数据</button>
+    </div>
+</div>
+
+<div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+    <div class="bg-blue-50 p-5 rounded-xl border border-blue-100">
+        <p class="text-xs font-bold text-blue-600 uppercase mb-1">总销售额 (Revenue)</p>
+        <p class="text-3xl font-black text-blue-900 tracking-tight" id="valSales">¥0.00</p>
+    </div>
+    <div class="bg-gray-50 p-5 rounded-xl border border-gray-200">
+        <p class="text-xs font-bold text-gray-500 uppercase mb-1">总成本 (Cost)</p>
+        <p class="text-3xl font-black text-gray-700 tracking-tight" id="valCost">¥0.00</p>
+    </div>
+    <div class="bg-yellow-50 p-5 rounded-xl border border-yellow-100">
+        <p class="text-xs font-bold text-yellow-600 uppercase mb-1">净毛利 (Profit)</p>
+        <p class="text-3xl font-black text-yellow-900 tracking-tight" id="valProfit">¥0.00</p>
+    </div>
+</div>
+
+<div class="bg-white rounded-xl shadow-sm overflow-hidden border border-gray-100">
+    <div class="px-6 py-4 border-b border-gray-50 bg-gray-50/50">
+        <h3 class="font-bold text-gray-800">销售明细清单</h3>
+    </div>
+    <div class="overflow-x-auto">
+        <table class="w-full text-left text-sm whitespace-nowrap">
+            <tbody id="tbody" class="divide-y divide-gray-50">
+                <tr><td class="p-8 text-center text-gray-400">数据加载中...</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+    // 🟢 核心：防呆格式化函数
+    function fmt(n) { 
+        if (n === null || n === undefined || n === '') return '0.00';
+        let num = parseFloat(n);
+        return isNaN(num) ? '0.00' : num.toLocaleString('zh-CN', {minimumFractionDigits: 2, maximumFractionDigits: 2}); 
+    }
+
+    const now = new Date();
+    document.getElementById('startDate').value = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`;
+    document.getElementById('endDate').value = now.toISOString().split('T')[0];
+    let staffLoaded = false;
+
+    async function loadData() {
+        const start = document.getElementById('startDate').value;
+        const end = document.getElementById('endDate').value;
+        const staffId = document.getElementById('staffSelect').value;
+        let url = `/api/analysis/profit_dashboard/?start_date=${start}&end_date=${end}&t=${Date.now()}`;
+        if (staffId) url += `&staff_id=${staffId}`;
+
+        try {
+            const res = await axios.get(url);
+            const data = res.data;
+            
+            // 🟢 使用 safe fmt 函数，防止 NaN
+            // 确保后端返回结构正确
+            const summary = data.summary || { sales: 0, cost: 0, profit: 0 };
+            document.getElementById('valSales').innerText = '¥' + fmt(summary.sales);
+            document.getElementById('valCost').innerText = '¥' + fmt(summary.cost);
+            document.getElementById('valProfit').innerText = '¥' + fmt(summary.profit);
+
+            // 加载员工下拉框
+            if (!staffLoaded && data.options?.staff) {
+                const sel = document.getElementById('staffSelect');
+                sel.innerHTML = '<option value="">全部销售员</option>';
+                data.options.staff.forEach(s => {
+                    sel.innerHTML += `<option value="${s.id}">${s.name}</option>`;
+                });
+                staffLoaded = true;
+            }
+
+            const tbody = document.getElementById('tbody');
+            const list = data.list || [];
+            
+            if (list.length === 0) { 
+                tbody.innerHTML = '<tr><td colspan="2" class="p-8 text-center text-gray-400">暂无销售数据</td></tr>'; 
+                return; 
+            }
+            
+            tbody.innerHTML = list.map(i => {
+                const win = parseFloat(i.profit) >= 0;
+                return `<tr class="hover:bg-gray-50 transition">
+                    <td class="px-6 py-4">
+                        <div class="font-bold text-gray-800 text-base">${i.product_name}</div>
+                        <div class="text-xs text-gray-400 mt-1 flex gap-2">
+                            <span>${i.date}</span>
+                            <span class="bg-gray-100 px-1.5 py-0.5 rounded text-gray-500 font-mono">${i.zencode}</span>
+                        </div>
+                    </td>
+                    <td class="px-6 py-4 text-right">
+                        <div class="flex justify-end gap-2 mb-1.5">
+                            <span class="bg-blue-50 text-blue-600 px-2 py-0.5 rounded text-xs font-bold">销: ${i.staff}</span>
+                            <span class="bg-purple-50 text-purple-600 px-2 py-0.5 rounded text-xs font-bold">客: ${i.customer}</span>
+                        </div>
+                        <div class="font-bold text-lg ${win?'text-green-600':'text-red-500'}">
+                            ${win?'+':''}${fmt(i.profit)}
+                        </div>
+                        <div class="text-xs text-gray-300">毛利</div>
+                    </td>
+                </tr>`;
+            }).join('');
+            
+        } catch (e) { 
+            console.error(e);
+            alert('加载失败，可能您权限不足'); 
+        }
+    }
+    loadData();
+    // 🟢 核心：防呆格式化函数
+    function fmt(n) { 
+        if (n === null || n === undefined || n === '') return '0.00';
+        let num = parseFloat(n);
+        return isNaN(num) ? '0.00' : num.toLocaleString('zh-CN', {minimumFractionDigits: 2, maximumFractionDigits: 2}); 
+    }
+</script>
+{% endblock %}

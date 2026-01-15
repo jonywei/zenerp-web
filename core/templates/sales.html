@@ -1,0 +1,95 @@
+{% extends 'base.html' %}
+{% block title %}销售开单{% endblock %}
+{% block content %}
+<div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+    <div class="p-6 border-b border-gray-100 bg-gray-50"><h2 class="text-lg font-bold text-gray-800">商品销售出库</h2></div>
+    <form class="p-6 space-y-6">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div>
+                <label class="block text-sm font-bold text-gray-700 mb-2">选择客户</label>
+                <div class="flex gap-2">
+                    <select id="contact_id" class="w-full h-12 border-gray-300 rounded-lg px-3 bg-white"><option>加载中...</option></select>
+                    <button type="button" onclick="showAddModal()" class="w-12 h-12 bg-blue-100 text-blue-600 rounded-lg font-bold">+</button>
+                </div>
+            </div>
+            <div>
+                <label class="block text-sm font-bold text-gray-700 mb-2">选择商品 (在库)</label>
+                <select id="product_id" class="w-full h-12 border-gray-300 rounded-lg px-3 bg-white"><option>加载中...</option></select>
+            </div>
+        </div>
+        <div class="bg-blue-50 p-5 rounded-xl border border-blue-100 grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div>
+                <label class="block text-xs font-bold text-blue-800 mb-1">成交价 (应收)</label>
+                <input type="number" id="price" class="w-full h-10 rounded border-blue-200 border px-3 font-bold text-blue-700 text-lg">
+            </div>
+            <div>
+                <label class="block text-xs font-bold text-blue-800 mb-1">实收金额</label>
+                <input type="number" id="received" class="w-full h-10 rounded border-blue-200 border px-3 font-bold text-green-700 text-lg">
+            </div>
+            <div>
+                <label class="block text-xs font-bold text-blue-800 mb-1">收款账户</label>
+                <select id="account_id" class="w-full h-10 rounded border-blue-200 border px-3 text-sm bg-white"><option value="">请选择...</option></select>
+            </div>
+        </div>
+        <button type="button" onclick="submitForm()" class="w-full bg-blue-600 text-white py-3 rounded-xl font-bold hover:bg-blue-700 shadow-lg">确认出库</button>
+    </form>
+</div>
+
+<div id="addModal" class="fixed inset-0 bg-black bg-opacity-50 hidden z-50 flex items-center justify-center">
+    <div class="bg-white p-6 rounded-lg w-80">
+        <h3 class="font-bold mb-4">新增客户</h3>
+        <input id="newCName" class="w-full border rounded h-10 px-3 mb-3" placeholder="姓名">
+        <input id="newCPhone" class="w-full border rounded h-10 px-3 mb-4" placeholder="电话">
+        <div class="flex justify-end gap-2">
+            <button onclick="document.getElementById('addModal').classList.add('hidden')" class="px-4 py-2 bg-gray-100 rounded">取消</button>
+            <button onclick="addC()" class="px-4 py-2 bg-blue-600 text-white rounded">保存</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    async function init() {
+        try {
+            const [c, p, a] = await Promise.all([
+                axios.get('/api/contacts/?page_size=1000&t='+Date.now()),
+                axios.get('/api/products/?status=IN_STOCK&page_size=1000&t='+Date.now()),
+                axios.get('/api/analysis/accounting/?t='+Date.now())
+            ]);
+            // 修复：兼容 results 结构
+            const contacts = c.data.results || c.data;
+            const products = p.data.results || p.data;
+            
+            document.getElementById('contact_id').innerHTML = '<option value="">请选择...</option>' + contacts.map(i=>`<option value="${i.id}">${i.name}</option>`).join('');
+            document.getElementById('product_id').innerHTML = '<option value="">请选择...</option>' + products.map(i=>`<option value="${i.id}">[${i.zencode}] ${i.name} (¥${i.cost_price})</option>`).join('');
+            document.getElementById('account_id').innerHTML = a.data.accounts.map(i=>`<option value="${i.id}">${i.name}</option>`).join('');
+        } catch(e) { alert('加载失败，请检查网络'); }
+    }
+    init();
+
+    window.showAddModal = () => document.getElementById('addModal').classList.remove('hidden');
+    async function addC() {
+        try {
+            const res = await axios.post('/api/contacts/', { name: document.getElementById('newCName').value, phone: document.getElementById('newCPhone').value });
+            const sel = document.getElementById('contact_id');
+            const opt = document.createElement('option');
+            opt.value = res.data.id; opt.text = res.data.name; opt.selected = true;
+            sel.appendChild(opt);
+            document.getElementById('addModal').classList.add('hidden');
+        } catch(e) { alert('添加失败'); }
+    }
+
+    async function submitForm() {
+        const pid = document.getElementById('product_id').value;
+        if(!pid) return alert('请选择商品');
+        try {
+            await axios.post(`/api/products/${pid}/sell/`, {
+                contact_id: document.getElementById('contact_id').value,
+                price: document.getElementById('price').value,
+                received_amount: document.getElementById('received').value || 0,
+                account_id: document.getElementById('account_id').value
+            });
+            alert('出库成功'); window.location.href='/inventory/';
+        } catch(e){ alert('失败:'+e.response.data.detail); }
+    }
+</script>
+{% endblock %}

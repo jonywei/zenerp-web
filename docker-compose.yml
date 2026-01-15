@@ -1,0 +1,44 @@
+version: '3.8'
+
+services:
+  # --- 1. 数据库服务 (ZenERP 独立库) ---
+  db:
+    image: postgres:15
+    container_name: zenerp_db        # 🟢 改名：防止与老项目冲突
+    restart: always
+    environment:
+      POSTGRES_DB: zenerp            # 🟢 改库名
+      POSTGRES_USER: zenerp_admin    # 🟢 改用户
+      POSTGRES_PASSWORD: zenerp_secure_password # 🟢 改密码
+    volumes:
+      - ./db_data:/var/lib/postgresql/data
+    ports:
+      - "8667:5432"                  # 🟢 数据库对外端口：8667
+    networks:
+      - zenerp_net
+
+  # --- 2. Web 服务 (ZenERP 后端) ---
+  web:
+    build: .
+    container_name: zenerp_web       # 🟢 改名
+    command: python manage.py runserver 0.0.0.0:8000
+    volumes:
+      - .:/app                       # 代码同步
+      - ./uploads:/app/uploads       # 图片存储
+    ports:
+      - "8666:8000"                  # 🟢 Web对外端口：8666
+    depends_on:
+      - db
+    # 🟢 关键：将数据库信息注入 Django
+    environment:
+      - DB_NAME=zenerp
+      - DB_USER=zenerp_admin
+      - DB_PASSWORD=zenerp_secure_password
+      - DB_HOST=zenerp_db            # 必须指向上面的 db 服务名
+      - DB_PORT=5432                 # 容器内部端口永远是 5432
+    networks:
+      - zenerp_net
+
+networks:
+  zenerp_net:                        # 🟢 独立网络
+    driver: bridge

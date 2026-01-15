@@ -1,0 +1,212 @@
+{% extends 'base.html' %}
+{% block title %}快速入库{% endblock %}
+{% block content %}
+<div class="max-w-4xl mx-auto bg-white rounded-2xl shadow-sm border border-gray-100 p-6 md:p-8">
+    <div class="flex justify-between items-center mb-6 border-l-4 border-green-500 pl-3">
+        <h2 class="text-xl font-bold text-gray-800">商品入库存档</h2>
+    </div>
+    
+    <form id="entryForm" class="space-y-6">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div>
+                <label class="block text-sm font-bold text-gray-700 mb-2">供应商</label>
+                <div class="flex gap-2">
+                    <select id="supplier_id" class="flex-1 h-10 border rounded px-3 bg-white outline-none focus:ring-2 focus:ring-green-500">
+                        <option value="0">🛒 散客 / 无供应商</option>
+                    </select>
+                    <button type="button" onclick="showAddModal()" class="w-10 h-10 bg-green-100 text-green-700 rounded font-bold hover:bg-green-200 text-xl flex items-center justify-center">+</button>
+                </div>
+            </div>
+            <div>
+                <label class="block text-sm font-bold text-gray-700 mb-2">商品分类 <span class="text-red-500">*</span></label>
+                <select name="category" class="form-control h-10 border rounded px-3 w-full bg-white" id="category" onchange="handleCategoryChange()">
+                    <option value="ZJ">🖥️ 整机 (电脑主机/笔记本)</option>
+                    <option value="XS">📺 显示器</option>
+                    <option value="SJ">🔩 散件/配件</option>
+                    <option value="PH">📱 手机 (Phone)</option>
+                    <option value="TB">📟 平板 (Tablet)</option>
+                    <option value="ZX">📦 杂项/其他</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="bg-gray-50 p-4 rounded-xl border border-dashed border-gray-300 text-center relative group hover:border-green-400 transition cursor-pointer">
+            <input type="file" id="imageFile" accept="image/*" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" onchange="previewImage(this)">
+            <div id="uploadTip" class="py-6">
+                <p class="text-4xl mb-2">📷</p>
+                <p class="text-sm text-gray-500 font-bold">点击拍摄/上传商品图片</p>
+            </div>
+            <img id="imgPreview" class="hidden h-40 mx-auto rounded shadow-sm object-contain bg-white relative z-0">
+        </div>
+
+        <div class="bg-yellow-50 p-4 rounded-lg border border-yellow-200">
+            <label class="block text-sm font-bold text-yellow-800 mb-2">
+                🔢 序列号 / IMEI / SN码 <span class="text-xs font-normal text-gray-500">(唯一身份ID)</span>
+            </label>
+            <input type="text" id="sn" class="w-full h-12 border border-yellow-300 rounded px-3 text-lg font-mono tracking-wide focus:ring-2 focus:ring-yellow-500" placeholder="扫码或手动输入 (留空则自动生成)">
+        </div>
+
+        <div id="computerConfig" class="bg-blue-50 p-5 rounded-lg border border-blue-100 transition-all duration-300">
+            <div class="flex justify-between items-center mb-4 pb-2 border-b border-blue-200">
+                <h3 class="text-sm font-bold text-blue-700" id="configTitle">🖥️ 详细配置单</h3>
+                <button type="button" onclick="autoGenerateName()" class="text-xs text-blue-600 bg-white px-2 py-1 rounded shadow-sm border border-blue-100 hover:bg-blue-50">
+                    点击刷新名称生成 ↻
+                </button>
+            </div>
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div>
+                    <label class="text-xs text-blue-600 font-bold block mb-1" id="lbl_cpu">CPU</label>
+                    <input id="cpu" class="w-full h-9 border rounded px-2 text-sm" placeholder="i5-12400F" oninput="autoGenerateName()">
+                </div>
+                <div>
+                    <label class="text-xs text-blue-600 font-bold block mb-1" id="lbl_ram">内存</label>
+                    <input id="ram" class="w-full h-9 border rounded px-2 text-sm" placeholder="16G" oninput="autoGenerateName()">
+                </div>
+                <div>
+                    <label class="text-xs text-blue-600 font-bold block mb-1" id="lbl_disk">硬盘</label>
+                    <input id="disk" class="w-full h-9 border rounded px-2 text-sm" placeholder="512G" oninput="autoGenerateName()">
+                </div>
+                <div>
+                    <label class="text-xs text-blue-600 font-bold block mb-1" id="lbl_gpu">显卡 (空=核显)</label>
+                    <input id="gpu" class="w-full h-9 border rounded px-2 text-sm" placeholder="RTX3060" oninput="autoGenerateName()">
+                </div>
+            </div>
+        </div>
+
+        <div>
+            <label class="block text-sm font-bold text-gray-700 mb-2">备注 / 成色</label>
+            <input id="note" class="w-full h-10 border rounded px-3" placeholder="例如：海景房机箱 / 99新" oninput="autoGenerateName()">
+        </div>
+
+        <div>
+            <label class="block text-sm font-bold text-gray-700 mb-2">商品名称 <span class="text-red-500">*</span></label>
+            <input id="name" class="w-full h-10 border rounded px-3 focus:ring-2 focus:ring-green-500 font-bold text-gray-700 bg-gray-50" placeholder="填写配置自动生成...">
+        </div>
+
+        <div class="bg-gray-50 p-5 rounded border border-gray-200 space-y-4">
+            <div class="grid grid-cols-3 gap-4 border-b border-gray-200 pb-4">
+                <div><label class="block text-xs font-bold text-gray-500 mb-1">入库成本 <span class="text-red-500">*</span></label><input id="cost" type="number" class="w-full h-10 border rounded px-3 font-bold text-red-600 text-lg"></div>
+                <div><label class="block text-xs font-bold text-gray-500 mb-1">同行价</label><input id="peer_price" type="number" class="w-full h-10 border rounded px-3 font-bold text-blue-600" placeholder="0.00"></div>
+                <div><label class="block text-xs font-bold text-gray-500 mb-1">零售价</label><input id="retail_price" type="number" class="w-full h-10 border rounded px-3 font-bold text-green-600" placeholder="0.00"></div>
+            </div>
+            <div class="grid grid-cols-2 gap-4">
+                <div><label class="block text-xs font-bold text-gray-500 mb-1">实付金额</label><input id="paid" type="number" class="w-full h-10 border rounded px-3 font-bold text-gray-800" value="0"></div>
+                <div><label class="block text-xs font-bold text-gray-500 mb-1">付款账户</label><select id="acc" class="w-full h-10 border rounded px-3 text-sm bg-white"><option value="">未付留空...</option></select></div>
+            </div>
+        </div>
+
+        <button type="button" onclick="submitForm()" class="w-full bg-green-600 text-white py-3 rounded-lg font-bold hover:bg-green-700 shadow-md text-lg">确认入库存档</button>
+    </form>
+</div>
+
+<div id="addModal" class="fixed inset-0 bg-black bg-opacity-50 hidden z-50 flex items-center justify-center"><div class="bg-white p-6 rounded-lg w-80 shadow-xl"><input id="newCName" class="w-full border rounded h-10 px-3 mb-3" placeholder="名称"><input id="newCPhone" class="w-full border rounded h-10 px-3 mb-3" placeholder="电话"><input id="newCAddr" class="w-full border rounded h-10 px-3 mb-4" placeholder="地址"><div class="flex justify-end gap-2"><button onclick="document.getElementById('addModal').classList.add('hidden')" class="px-4 py-2 bg-gray-100 rounded">取消</button><button onclick="addContact()" class="px-4 py-2 bg-green-600 text-white rounded">保存</button></div></div></div>
+<div id="successModal" class="fixed inset-0 bg-black bg-opacity-60 hidden z-50 flex items-center justify-center p-4"><div class="bg-white rounded-2xl w-full max-w-sm shadow-2xl overflow-hidden"><div class="bg-green-500 p-6 text-center"><h3 class="text-white font-bold text-xl">入库成功!</h3></div><div class="p-6 text-center space-y-4"><div><p class="text-xs text-gray-400">ZenCode</p><p class="text-3xl font-mono font-black text-gray-800" id="resZencode">--</p></div><div><p class="text-xs text-gray-400">商品名称</p><p class="text-sm font-bold text-gray-700 mt-1" id="resName">--</p></div><button onclick="location.reload()" class="w-full bg-green-100 text-green-700 py-3 rounded-xl font-bold">继续入库</button></div></div></div>
+
+<script>
+    async function init() {
+        const [c, a] = await Promise.all([axios.get('/api/contacts/?page_size=1000'), axios.get('/api/analysis/accounting/')]);
+        const sSelect = document.getElementById('supplier_id');
+        (c.data.results || c.data).forEach(i => sSelect.innerHTML += `<option value="${i.id}">${i.name}</option>`);
+        a.data.accounts.forEach(i => document.getElementById('acc').innerHTML += `<option value="${i.id}">${i.name}</option>`);
+        handleCategoryChange();
+    }
+    init();
+
+    function handleCategoryChange() {
+        const cat = document.getElementById('category').value;
+        const div = document.getElementById('computerConfig');
+        const title = document.getElementById('configTitle');
+        const snInput = document.getElementById('sn');
+        
+        if (cat === 'SJ' || cat === 'ZX') { div.classList.add('hidden'); } else { div.classList.remove('hidden'); }
+
+        if (cat === 'PH' || cat === 'TB') {
+            title.innerText = cat === 'PH' ? '📱 手机参数录入' : '📟 平板参数录入';
+            setLabels('品牌 (Brand)', '如: Apple / 华为', '型号 (Model)', '如: iPhone 15 / Mate 60', '容量/配置', '如: 256G / 512G', '颜色/版本', '如: 黑色 / 国行');
+            document.getElementById('note').placeholder = "例如：电池98% / 屏幕无划痕 / 在保";
+            snInput.placeholder = "📱 请扫描/输入 IMEI (必填)";
+        } else if (cat === 'XS') {
+            title.innerText = '📺 显示器参数';
+            setLabels('品牌', '如: 三星 / AOC', '尺寸', '如: 27英寸', '刷新率', '如: 144Hz', '面板/分辨率', '如: IPS / 4K');
+            document.getElementById('note').placeholder = "例如：无坏点 / 支架齐全";
+            snInput.placeholder = "📺 序列号/SN (建议填写)";
+        } else {
+            title.innerText = '🖥️ 详细配置单';
+            setLabels('CPU', 'i5-12400F', '内存', '16G', '硬盘', '512G', '显卡 (空=核显)', 'RTX3060');
+            document.getElementById('note').placeholder = "例如：海景房机箱 / 99新";
+            snInput.placeholder = "🖥️ 机箱编号/SN (留空自动生成)";
+        }
+        autoGenerateName();
+    }
+
+    function setLabels(l1, p1, l2, p2, l3, p3, l4, p4) {
+        document.getElementById('lbl_cpu').innerText = l1; document.getElementById('cpu').placeholder = p1;
+        document.getElementById('lbl_ram').innerText = l2; document.getElementById('ram').placeholder = p2;
+        document.getElementById('lbl_disk').innerText = l3; document.getElementById('disk').placeholder = p3;
+        document.getElementById('lbl_gpu').innerText = l4; document.getElementById('gpu').placeholder = p4;
+    }
+
+    function autoGenerateName() {
+        const cat = document.getElementById('category').value;
+        if (cat === 'SJ' || cat === 'ZX') return;
+        const v1 = document.getElementById('cpu').value.trim();
+        const v2 = document.getElementById('ram').value.trim();
+        const v3 = document.getElementById('disk').value.trim();
+        const v4 = document.getElementById('gpu').value.trim();
+        const note = document.getElementById('note').value.trim();
+        let parts = [];
+        if (cat === 'PH' || cat === 'TB') {
+            if(v1) parts.push(v1); if(v2) parts.push(v2); if(v3) parts.push(v3); if(v4) parts.push(v4); if(note) parts.push(note);
+        } else if (cat === 'XS') {
+            if(v1) parts.push(v1); if(v2) parts.push(v2); if(v3) parts.push(v3); if(v4) parts.push(v4); if(note) parts.push(note);
+        } else {
+            if(v1) parts.push(v1); if(v2) parts.push(v2); if(v3) parts.push(v3);
+            if (v4) { parts.push(v4); } else if (v1) { parts.push("核显主机"); }
+            if(note) parts.push(note);
+        }
+        document.getElementById('name').value = parts.join(' '); 
+    }
+
+    function previewImage(input) { if (input.files && input.files[0]) { const reader = new FileReader(); reader.onload = function(e) { document.getElementById('imgPreview').src = e.target.result; document.getElementById('imgPreview').classList.remove('hidden'); document.getElementById('uploadTip').classList.add('hidden'); }; reader.readAsDataURL(input.files[0]); } }
+    
+    window.showAddModal = () => document.getElementById('addModal').classList.remove('hidden');
+    async function addContact() { const name = document.getElementById('newCName').value; if(!name) return alert('名称必填'); try { const res = await axios.post('/api/contacts/', { name, phone: document.getElementById('newCPhone').value, address: document.getElementById('newCAddr').value }); const sSelect = document.getElementById('supplier_id'); const opt = document.createElement('option'); opt.value = res.data.id; opt.text = res.data.name; opt.selected = true; sSelect.appendChild(opt); document.getElementById('addModal').classList.add('hidden'); } catch(e) { alert('添加失败'); } }
+    
+    async function submitForm() {
+        const cat = document.getElementById('category').value;
+        const name = document.getElementById('name').value;
+        const cost = document.getElementById('cost').value;
+        const sn = document.getElementById('sn').value.trim(); // 🟢 获取序列号
+
+        if(!name || !cost) return alert("请填写名称和成本");
+        // 手机平板必须填SN，防止脏数据
+        if((cat === 'PH' || cat === 'TB') && !sn) return alert("📱 手机/平板 必须填写 IMEI/序列号！");
+        
+        const formData = new FormData();
+        formData.append('supplier_id', document.getElementById('supplier_id').value);
+        formData.append('category', cat);
+        formData.append('name', name);
+        formData.append('sn', sn); // 🟢 发送序列号
+        formData.append('cost_price', cost);
+        formData.append('paid_amount', document.getElementById('paid').value || 0);
+        formData.append('account_id', document.getElementById('acc').value || '');
+        formData.append('note', document.getElementById('note').value);
+        formData.append('peer_price', document.getElementById('peer_price').value || 0);
+        formData.append('retail_price', document.getElementById('retail_price').value || 0);
+        formData.append('cpu', document.getElementById('cpu').value);
+        formData.append('gpu', document.getElementById('gpu').value);
+        formData.append('ram', document.getElementById('ram').value);
+        formData.append('disk', document.getElementById('disk').value);
+        
+        const imgFile = document.getElementById('imageFile').files[0];
+        if (imgFile) formData.append('image', imgFile);
+
+        try {
+            const res = await axios.post('/api/products/', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
+            document.getElementById('resZencode').innerText = res.data.zencode;
+            document.getElementById('resName').innerText = res.data.name;
+            document.getElementById('successModal').classList.remove('hidden');
+        } catch(e) { alert("入库失败: " + e); }
+    }
+</script>
+{% endblock %}

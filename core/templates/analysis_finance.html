@@ -1,0 +1,105 @@
+{% extends 'base.html' %}
+{% block title %}欠款往来{% endblock %}
+{% block content %}
+<div class="max-w-6xl mx-auto">
+    <div class="flex bg-white p-1 rounded-lg mb-6 shadow-sm border border-gray-200 w-full md:w-96 mx-auto">
+        <button onclick="tab='in';render()" id="btnIn" class="flex-1 py-2 rounded-md font-bold text-sm transition">应收 (别人欠我)</button>
+        <button onclick="tab='out';render()" id="btnOut" class="flex-1 py-2 rounded-md font-bold text-sm transition">应付 (我欠别人)</button>
+    </div>
+    
+    <div id="list" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>
+</div>
+
+<div id="historyModal" class="fixed inset-0 bg-black bg-opacity-50 hidden z-50 flex items-center justify-center p-4">
+    <div class="bg-white rounded-xl w-full max-w-2xl max-h-[85vh] flex flex-col shadow-2xl">
+        <div class="px-6 py-4 border-b flex justify-between items-center bg-gray-50 rounded-t-xl">
+            <h3 class="font-bold text-lg text-gray-800" id="modalTitle">交易明细</h3>
+            <button onclick="document.getElementById('historyModal').classList.add('hidden')" class="text-gray-500 hover:text-gray-700 text-2xl">&times;</button>
+        </div>
+        <div class="flex-1 overflow-y-auto p-0" id="historyList"></div>
+    </div>
+</div>
+
+<script>
+    let tab = 'in', all = [], accs = [];
+    
+    async function load() {
+        const [c, a] = await Promise.all([
+            axios.get('/api/contacts/?page_size=1000&t='+Date.now()),
+            axios.get('/api/analysis/accounting/?t='+Date.now())
+        ]);
+        all = c.data.results || c.data;
+        accs = a.data.accounts;
+        render();
+    }
+
+    function render() {
+        const activeClass = 'bg-blue-50 text-blue-600 shadow-sm ring-1 ring-blue-200';
+        const normalClass = 'text-gray-500 hover:bg-gray-50';
+        document.getElementById('btnIn').className = `flex-1 py-2 rounded-md font-bold text-sm transition ${tab==='in'?activeClass:normalClass}`;
+        document.getElementById('btnOut').className = `flex-1 py-2 rounded-md font-bold text-sm transition ${tab==='out'?activeClass:normalClass}`;
+
+        const list = all.filter(c => tab==='in' ? parseFloat(c.balance)>0 : parseFloat(c.balance)<0);
+        
+        document.getElementById('list').innerHTML = list.length ? list.map(c => `
+            <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex justify-between items-center group hover:border-blue-300 transition cursor-pointer" onclick="showHistory(${c.id}, '${c.name}', event)">
+                <div>
+                    <h3 class="font-bold text-gray-800 text-lg group-hover:text-blue-600">${c.name}</h3>
+                    <p class="text-xs text-gray-400 mt-1">点击查看详情 ›</p>
+                </div>
+                <div class="text-right">
+                    <p class="font-black text-2xl ${tab==='in'?'text-green-600':'text-red-600'}">¥${Math.abs(c.balance).toLocaleString()}</p>
+                    <button onclick="repay(${c.id}, '${c.name}', event)" class="mt-2 text-xs bg-gray-100 hover:bg-blue-600 hover:text-white text-gray-600 px-4 py-1.5 rounded-full border transition font-bold">
+                        ${tab==='in'?'收款核销':'付款核销'}
+                    </button>
+                </div>
+            </div>`).join('') : '<div class="col-span-full text-center text-gray-400 py-10">无欠款记录</div>';
+    }
+
+    async function showHistory(id, name, e) {
+        if(e.target.tagName === 'BUTTON') return; // 防止点到按钮
+
+        document.getElementById('modalTitle').innerText = `${name} - 往来明细`;
+        document.getElementById('historyList').innerHTML = '<div class="p-10 text-center text-gray-400">加载中...</div>';
+        document.getElementById('historyModal').classList.remove('hidden');
+
+        try {
+            // 🟢 确保调用的是正确的 history 接口
+            const res = await axios.get(`/api/contacts/${id}/history/?t=` + Date.now());
+            const list = res.data;
+            if(list.length === 0) {
+                document.getElementById('historyList').innerHTML = '<div class="p-10 text-center text-gray-400">暂无交易记录</div>';
+                return;
+            }
+            document.getElementById('historyList').innerHTML = list.map(t => `
+                <div class="px-6 py-4 border-b border-gray-50 hover:bg-gray-50 flex justify-between items-center">
+                    <div>
+                        <div class="font-bold text-gray-800 text-sm">${t.type} <span class="font-normal text-gray-500">- ${t.operator||'系统'}</span></div>
+                        <div class="text-xs text-gray-500 mt-1">${t.date} <span class="bg-gray-100 px-1 rounded ml-1">${t.product || t.remark}</span></div>
+                    </div>
+                    <div class="text-right font-mono font-bold text-gray-700">¥${parseFloat(t.amount).toLocaleString()}</div>
+                </div>
+            `).join('');
+        } catch(e) {
+            document.getElementById('historyList').innerHTML = '<div class="p-10 text-center text-red-500">加载失败</div>';
+        }
+    }
+
+    async function repay(id, name, e) {
+        e.stopPropagation();
+        if(!accs.length) return alert("请先创建资金账户");
+        const amount = prompt(`对 [${name}] 进行核销\n请输入金额:`);
+        if(!amount) return;
+        try {
+            await axios.post(`/api/contacts/${id}/repay/`, {
+                amount: amount,
+                account_id: accs[0].id,
+                action_type: tab
+            });
+            alert("核销成功");
+            load();
+        } catch(e) { alert("失败"); }
+    }
+    load();
+</script>
+{% endblock %}

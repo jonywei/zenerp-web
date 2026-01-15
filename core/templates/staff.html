@@ -1,0 +1,59 @@
+{% extends 'base.html' %}
+{% block title %}员工管理{% endblock %}
+{% block content %}
+<div class="flex justify-between items-center mb-6">
+    <h1 class="text-2xl font-bold text-gray-800 border-l-4 border-indigo-500 pl-3">员工账号管理</h1>
+    <button onclick="document.getElementById('addModal').classList.remove('hidden')" class="bg-indigo-600 text-white px-4 py-2 rounded-lg font-bold hover:bg-indigo-700 shadow-sm flex items-center">
+        <span class="text-xl mr-1">+</span> 新增员工
+    </button>
+</div>
+
+<div class="grid grid-cols-1 md:grid-cols-3 gap-6" id="staffList">
+    <div class="col-span-3 text-center py-10 text-gray-400">加载中...</div>
+</div>
+
+<div id="addModal" class="fixed inset-0 bg-black bg-opacity-50 hidden z-50 flex items-center justify-center p-4">
+    <div class="bg-white rounded-xl shadow-2xl w-full max-w-md p-6">
+        <h3 class="text-xl font-bold text-gray-800 mb-4">新增销售员工</h3>
+        <div class="space-y-4">
+            <input type="text" id="fname" class="w-full h-10 border rounded px-3" placeholder="姓名 (如: 小王)">
+            <input type="number" id="uname" class="w-full h-10 border rounded px-3" placeholder="登录手机号">
+            <input type="text" id="pwd" class="w-full h-10 border rounded px-3" placeholder="初始密码 (默认123456)">
+        </div>
+        <div class="mt-6 flex gap-3">
+            <button onclick="document.getElementById('addModal').classList.add('hidden')" class="flex-1 py-2 bg-gray-100 rounded-lg font-bold">取消</button>
+            <button onclick="addStaff()" class="flex-1 py-2 bg-indigo-600 text-white rounded-lg font-bold">确认添加</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    async function loadStaff() {
+        try {
+            const res = await axios.get('/api/staff/');
+            const list = res.data.results || res.data;
+            const container = document.getElementById('staffList');
+            if (list.length === 0) { container.innerHTML = `<div class="col-span-3 text-center py-10 text-gray-400">暂无员工</div>`; return; }
+            container.innerHTML = list.map(u => `
+                <div class="bg-white p-5 rounded-xl shadow-sm border border-gray-100 flex items-center justify-between">
+                    <div class="flex items-center gap-4">
+                        <div class="w-12 h-12 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center font-bold text-lg">${(u.first_name||u.username).slice(0,1)}</div>
+                        <div>
+                            <div class="font-bold text-gray-800">${u.first_name||'未命名'}</div>
+                            <div class="text-sm text-gray-500">${u.username}</div>
+                        </div>
+                    </div>
+                    <span class="bg-blue-100 text-blue-700 text-xs px-2 py-1 rounded font-bold">销售</span>
+                </div>
+            `).join('');
+        } catch (e) { console.error(e); }
+    }
+    async function addStaff() {
+        const data = { first_name: document.getElementById('fname').value, username: document.getElementById('uname').value, password: document.getElementById('pwd').value };
+        if(!data.username) return alert('手机号必填');
+        try { await axios.post('/api/staff/', data); alert('添加成功'); document.getElementById('addModal').classList.add('hidden'); loadStaff(); } 
+        catch (e) { alert('添加失败: ' + (e.response?.data?.detail||'未知错误')); }
+    }
+    loadStaff();
+</script>
+{% endblock %}
