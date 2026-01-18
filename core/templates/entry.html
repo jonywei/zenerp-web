@@ -6,14 +6,13 @@
     
     <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 md:p-8">
         <div class="flex justify-between items-center mb-6 border-l-4 border-green-500 pl-3">
-            <h2 class="text-xl font-bold text-gray-800">商品入库存档 (智能版)</h2>
+            <h2 class="text-xl font-bold text-gray-800">商品入库存档 (批量版)</h2>
             <span class="text-xs text-gray-400" x-text="loading ? '数据加载中...' : 'Ready'"></span>
         </div>
 
         <div class="space-y-6">
             
             <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                
                 <div class="relative z-30">
                     <label class="block text-sm font-bold text-gray-700 mb-2">供应商</label>
                     <div class="flex gap-2 h-12">
@@ -58,20 +57,35 @@
                 </div>
             </div>
 
+            <div class="bg-blue-50 p-4 rounded-xl border border-blue-200 grid grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-sm font-bold text-blue-800 mb-2">入库数量</label>
+                    <input type="number" x-model="form.quantity" class="w-full h-12 border border-blue-300 rounded-lg px-4 font-bold text-lg text-blue-900 focus:ring-2 focus:ring-blue-500 outline-none" placeholder="1">
+                </div>
+                <div class="flex items-center h-full pt-6">
+                    <label class="flex items-center cursor-pointer">
+                        <input type="checkbox" x-model="form.need_sn" class="form-checkbox h-6 w-6 text-blue-600 rounded focus:ring-blue-500 border-gray-300 transition duration-150 ease-in-out">
+                        <span class="ml-2 text-sm font-bold text-gray-700">必须录入序列号</span>
+                    </label>
+                </div>
+                <div class="col-span-2 text-xs text-gray-500">
+                    <span x-show="form.need_sn">⚠️ 将生成“待入库”状态，需后续扫码转正。</span>
+                    <span x-show="!form.need_sn">✅ 将直接生成“在库”状态，系统自动生成流水号。</span>
+                </div>
+            </div>
+
             <div class="bg-gray-50 p-6 rounded-xl border-2 border-dashed border-gray-300 text-center relative group hover:border-green-400 transition cursor-pointer overflow-hidden h-48 flex flex-col justify-center items-center">
                 <input type="file" x-ref="imageInput" accept="image/*" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" @change="previewImage">
-                
                 <div x-show="!imgPreview" class="pointer-events-none">
                     <p class="text-4xl mb-2">📷</p>
                     <p class="text-sm text-gray-500 font-bold">点击拍摄/上传商品图片</p>
                 </div>
-                
                 <img x-show="imgPreview" :src="imgPreview" class="absolute inset-0 w-full h-full object-contain bg-white z-0 p-2">
             </div>
 
             <div class="bg-yellow-50 p-4 rounded-xl border border-yellow-200">
                 <label class="block text-sm font-bold text-yellow-800 mb-2">
-                    🔢 序列号 / IMEI / SN码 <span class="text-xs font-normal text-gray-500">(唯一身份ID)</span>
+                    🔢 序列号 / IMEI / SN码 <span x-text="form.need_sn ? '(必填)' : '(选填)'" class="text-xs font-normal text-gray-500"></span>
                 </label>
                 <input type="text" x-model="form.sn" class="w-full h-12 border border-yellow-300 rounded-lg px-4 text-lg font-mono tracking-wide focus:ring-2 focus:ring-yellow-500 outline-none bg-white" :placeholder="snPlaceholder">
             </div>
@@ -79,27 +93,13 @@
             <div x-show="showConfig" x-transition class="bg-blue-50 p-5 rounded-xl border border-blue-100 transition-all duration-300">
                 <div class="flex justify-between items-center mb-4 pb-2 border-b border-blue-200">
                     <h3 class="text-sm font-bold text-blue-700" x-text="configTitle">🖥️ 详细配置单</h3>
-                    <button type="button" @click="generateName()" class="text-xs text-blue-600 bg-white px-2 py-1 rounded shadow-sm border border-blue-100 hover:bg-blue-50">
-                        刷新名称 ↻
-                    </button>
+                    <button type="button" @click="generateName()" class="text-xs text-blue-600 bg-white px-2 py-1 rounded shadow-sm border border-blue-100 hover:bg-blue-50">刷新名称 ↻</button>
                 </div>
                 <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    <div>
-                        <label class="text-xs text-blue-600 font-bold block mb-1" x-text="labels.l1">CPU</label>
-                        <input x-model="form.cpu" @input="generateName" class="w-full h-10 border rounded-lg px-2 text-sm focus:ring-1 focus:ring-blue-500 outline-none" :placeholder="placeholders.p1">
-                    </div>
-                    <div>
-                        <label class="text-xs text-blue-600 font-bold block mb-1" x-text="labels.l2">内存</label>
-                        <input x-model="form.ram" @input="generateName" class="w-full h-10 border rounded-lg px-2 text-sm focus:ring-1 focus:ring-blue-500 outline-none" :placeholder="placeholders.p2">
-                    </div>
-                    <div>
-                        <label class="text-xs text-blue-600 font-bold block mb-1" x-text="labels.l3">硬盘</label>
-                        <input x-model="form.disk" @input="generateName" class="w-full h-10 border rounded-lg px-2 text-sm focus:ring-1 focus:ring-blue-500 outline-none" :placeholder="placeholders.p3">
-                    </div>
-                    <div>
-                        <label class="text-xs text-blue-600 font-bold block mb-1" x-text="labels.l4">显卡</label>
-                        <input x-model="form.gpu" @input="generateName" class="w-full h-10 border rounded-lg px-2 text-sm focus:ring-1 focus:ring-blue-500 outline-none" :placeholder="placeholders.p4">
-                    </div>
+                    <div><label class="text-xs text-blue-600 font-bold block mb-1" x-text="labels.l1">CPU</label><input x-model="form.cpu" @input="generateName" class="w-full h-10 border rounded-lg px-2 text-sm focus:ring-1 focus:ring-blue-500 outline-none" :placeholder="placeholders.p1"></div>
+                    <div><label class="text-xs text-blue-600 font-bold block mb-1" x-text="labels.l2">内存</label><input x-model="form.ram" @input="generateName" class="w-full h-10 border rounded-lg px-2 text-sm focus:ring-1 focus:ring-blue-500 outline-none" :placeholder="placeholders.p2"></div>
+                    <div><label class="text-xs text-blue-600 font-bold block mb-1" x-text="labels.l3">硬盘</label><input x-model="form.disk" @input="generateName" class="w-full h-10 border rounded-lg px-2 text-sm focus:ring-1 focus:ring-blue-500 outline-none" :placeholder="placeholders.p3"></div>
+                    <div><label class="text-xs text-blue-600 font-bold block mb-1" x-text="labels.l4">显卡</label><input x-model="form.gpu" @input="generateName" class="w-full h-10 border rounded-lg px-2 text-sm focus:ring-1 focus:ring-blue-500 outline-none" :placeholder="placeholders.p4"></div>
                 </div>
             </div>
 
@@ -116,7 +116,7 @@
             <div class="bg-gray-50 p-6 rounded-xl border border-gray-200 space-y-4">
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-4 border-b border-gray-200 pb-4">
                     <div>
-                        <label class="block text-xs font-bold text-gray-500 mb-1">入库成本 <span class="text-red-500">*</span></label>
+                        <label class="block text-xs font-bold text-gray-500 mb-1">单件成本 <span class="text-red-500">*</span></label>
                         <div class="relative"><span class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">¥</span><input x-model="form.cost_price" type="number" class="w-full h-12 border rounded-xl pl-8 pr-4 font-bold text-red-600 text-lg outline-none focus:border-red-500"></div>
                     </div>
                     <div>
@@ -130,7 +130,7 @@
                 </div>
                 <div class="grid grid-cols-2 gap-4">
                     <div>
-                        <label class="block text-xs font-bold text-gray-500 mb-1">实付金额</label>
+                        <label class="block text-xs font-bold text-gray-500 mb-1">实付总额</label>
                         <div class="relative"><span class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">¥</span><input x-model="form.paid_amount" type="number" class="w-full h-12 border rounded-xl pl-8 pr-4 font-bold text-gray-800 outline-none"></div>
                     </div>
                     <div>
@@ -143,237 +143,81 @@
                         </select>
                     </div>
                 </div>
+                <div class="text-xs text-red-500 font-bold" x-show="(form.cost_price * form.quantity) > form.paid_amount">
+                    ⚠️ 欠款: ¥<span x-text="((form.cost_price * form.quantity) - form.paid_amount).toFixed(2)"></span> 将计入应付账款
+                </div>
             </div>
 
             <button type="button" @click="submit()" :disabled="submitting" class="w-full bg-green-600 text-white py-4 rounded-xl font-bold hover:bg-green-700 shadow-lg hover:shadow-xl transition transform active:scale-[0.99] disabled:opacity-50 text-lg">
-                <span x-show="!submitting">确认入库存档</span>
+                <span x-show="!submitting" x-text="form.quantity > 1 ? `批量入库 (${form.quantity}件)` : '确认入库存档'"></span>
                 <span x-show="submitting">正在提交...</span>
             </button>
         </div>
     </div>
 
-    <div x-show="showAddModal" class="fixed inset-0 bg-black bg-opacity-40 z-50 flex items-center justify-center backdrop-blur-sm" style="display: none;" x-transition.opacity>
-        <div class="bg-white p-8 rounded-2xl w-full max-w-md shadow-2xl" @click.away="showAddModal = false">
-            <h3 class="font-black text-xl text-gray-800 mb-6">新增供应商</h3>
-            <div class="space-y-4">
-                <input x-model="newContact.name" class="w-full border border-gray-200 rounded-xl h-12 px-4 focus:ring-2 focus:ring-green-500 outline-none" placeholder="名称 (必填)">
-                <input x-model="newContact.phone" class="w-full border border-gray-200 rounded-xl h-12 px-4 focus:ring-2 focus:ring-green-500 outline-none" placeholder="电话 (选填)">
-                <input x-model="newContact.address" class="w-full border border-gray-200 rounded-xl h-12 px-4 focus:ring-2 focus:ring-green-500 outline-none" placeholder="地址/档口 (选填)">
-            </div>
-            <div class="flex justify-end gap-3 mt-8">
-                <button @click="showAddModal = false" class="px-5 py-2.5 bg-gray-100 rounded-xl text-sm font-bold text-gray-600">取消</button>
-                <button @click="saveNewContact()" class="px-6 py-2.5 bg-green-600 text-white rounded-xl text-sm font-bold hover:bg-green-700">保存</button>
-            </div>
-        </div>
-    </div>
-
-    <div x-show="showSuccess" class="fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4" style="display: none;" x-transition.opacity>
-        <div class="bg-white rounded-2xl w-full max-w-sm shadow-2xl overflow-hidden transform transition-all" x-transition.scale>
-            <div class="bg-green-500 p-6 text-center">
-                <h3 class="text-white font-bold text-xl">✅ 入库成功!</h3>
-            </div>
-            <div class="p-6 text-center space-y-4">
-                <div><p class="text-xs text-gray-400">ZenCode</p><p class="text-3xl font-mono font-black text-gray-800" x-text="resZencode">--</p></div>
-                <div><p class="text-xs text-gray-400">商品名称</p><p class="text-sm font-bold text-gray-700 mt-1" x-text="resName">--</p></div>
-                <button @click="window.location.reload()" class="w-full bg-green-100 text-green-700 py-3 rounded-xl font-bold hover:bg-green-200 transition">继续入库</button>
-            </div>
-        </div>
-    </div>
+    <div x-show="showAddModal" class="fixed inset-0 bg-black bg-opacity-40 z-50 flex items-center justify-center backdrop-blur-sm" style="display: none;" x-transition.opacity><div class="bg-white p-8 rounded-2xl w-full max-w-md shadow-2xl" @click.away="showAddModal = false"><h3 class="font-black text-xl text-gray-800 mb-6">新增供应商</h3><div class="space-y-4"><input x-model="newContact.name" class="w-full border border-gray-200 rounded-xl h-12 px-4 focus:ring-2 focus:ring-green-500 outline-none" placeholder="名称 (必填)"><input x-model="newContact.phone" class="w-full border border-gray-200 rounded-xl h-12 px-4 focus:ring-2 focus:ring-green-500 outline-none" placeholder="电话 (选填)"><input x-model="newContact.address" class="w-full border border-gray-200 rounded-xl h-12 px-4 focus:ring-2 focus:ring-green-500 outline-none" placeholder="地址/档口 (选填)"></div><div class="flex justify-end gap-3 mt-8"><button @click="showAddModal = false" class="px-5 py-2.5 bg-gray-100 rounded-xl text-sm font-bold text-gray-600">取消</button><button @click="saveNewContact()" class="px-6 py-2.5 bg-green-600 text-white rounded-xl text-sm font-bold hover:bg-green-700">保存</button></div></div></div>
+    <div x-show="showSuccess" class="fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4" style="display: none;" x-transition.opacity><div class="bg-white rounded-2xl w-full max-w-sm shadow-2xl overflow-hidden transform transition-all" x-transition.scale><div class="bg-green-500 p-6 text-center"><h3 class="text-white font-bold text-xl">✅ 入库成功!</h3></div><div class="p-6 text-center space-y-4"><div><p class="text-xs text-gray-400">ZenCode</p><p class="text-3xl font-mono font-black text-gray-800" x-text="resZencode">--</p></div><div><p class="text-xs text-gray-400">商品名称</p><p class="text-sm font-bold text-gray-700 mt-1" x-text="resName">--</p></div><button @click="window.location.reload()" class="w-full bg-green-100 text-green-700 py-3 rounded-xl font-bold hover:bg-green-200 transition">继续入库</button></div></div></div>
 
 </div>
 
 <script>
     function entryForm() {
         return {
-            loading: true,
-            submitting: false,
-            
-            // 数据源
-            contacts: [],
-            accounts: [],
-            
-            // 搜索状态
-            supOpen: false,
-            searchSupplier: '',
-            
-            // 弹窗状态
-            showAddModal: false,
-            showSuccess: false,
-            
-            // 结果回显
-            resZencode: '',
-            resName: '',
-
-            // 新增供应商表单
-            newContact: { name: '', phone: '', address: '' },
-            
-            // 主表单
+            loading: true, submitting: false, contacts: [], accounts: [], supOpen: false, searchSupplier: '', showAddModal: false, showSuccess: false, resZencode: '', resName: '', newContact: { name: '', phone: '', address: '' }, imgPreview: null,
             form: {
-                supplier_id: 0, // 默认散客
-                category: 'ZJ',
-                sn: '',
-                name: '',
-                note: '',
-                cpu: '', gpu: '', ram: '', disk: '',
-                cost_price: '', peer_price: '', retail_price: '',
-                paid_amount: 0,
-                account_id: ''
+                supplier_id: 0, category: 'ZJ', sn: '', name: '', note: '', cpu: '', gpu: '', ram: '', disk: '', cost_price: '', peer_price: '', retail_price: '', paid_amount: 0, account_id: '',
+                // 🟢 新增
+                quantity: 1,
+                need_sn: false
             },
-            
-            // 图片预览
-            imgPreview: null,
-
             async init() {
                 try {
-                    const [cRes, aRes] = await Promise.all([
-                        axios.get('/api/contacts/?page_size=1000'),
-                        axios.get('/api/analysis/accounting/')
-                    ]);
-                    this.contacts = cRes.data.results || cRes.data;
-                    this.accounts = aRes.data.accounts || [];
-                    
-                    // 默认选中第一个账户
+                    const [cRes, aRes] = await Promise.all([ axios.get('/api/contacts/?page_size=1000'), axios.get('/api/analysis/accounting/') ]);
+                    this.contacts = cRes.data.results || cRes.data; this.accounts = aRes.data.accounts || [];
                     if (this.accounts.length > 0) this.form.account_id = this.accounts[0].id;
                 } catch(e) { console.error(e); } finally { this.loading = false; }
-                
-                // 监听分类变化，初始化名称
                 this.$watch('form.category', () => this.generateName());
             },
-
-            // 供应商搜索
-            get filteredSuppliers() {
-                if(!this.searchSupplier) return this.contacts.slice(0, 5);
-                const k = this.searchSupplier.toLowerCase();
-                return this.contacts.filter(c => c.name.toLowerCase().includes(k) || (c.phone && c.phone.includes(k)));
-            },
-            selectSupplier(c) {
-                this.form.supplier_id = c.id;
-                this.searchSupplier = c.name;
-                this.supOpen = false;
-            },
+            get filteredSuppliers() { if(!this.searchSupplier) return this.contacts.slice(0, 5); const k = this.searchSupplier.toLowerCase(); return this.contacts.filter(c => c.name.toLowerCase().includes(k) || (c.phone && c.phone.includes(k))); },
+            selectSupplier(c) { this.form.supplier_id = c.id; this.searchSupplier = c.name; this.supOpen = false; },
             closeSupplier() { setTimeout(() => this.supOpen = false, 200) },
-
-            // 保存新供应商
-            async saveNewContact() {
-                if(!this.newContact.name) return alert("名称必填");
-                try {
-                    const res = await axios.post('/api/contacts/', this.newContact);
-                    this.contacts.unshift(res.data);
-                    this.selectSupplier(res.data);
-                    this.showAddModal = false;
-                    this.newContact = { name: '', phone: '', address: '' };
-                } catch(e) { 
-                    // 🟢 优化报错提示，不再显示“未知错误”
-                    const detail = e.response?.data ? JSON.stringify(e.response.data) : "网络错误";
-                    alert("添加失败: " + detail); 
-                }
-            },
-
-            // 图片预览
-            previewImage(e) {
-                const file = e.target.files[0];
-                if(file) {
-                    const reader = new FileReader();
-                    reader.onload = (e) => this.imgPreview = e.target.result;
-                    reader.readAsDataURL(file);
-                }
-            },
-
-            // 🟢 动态逻辑：配置单显示控制
-            get showConfig() {
-                return !['SJ', 'ZX'].includes(this.form.category);
-            },
+            async saveNewContact() { if(!this.newContact.name) return alert("名称必填"); try { const res = await axios.post('/api/contacts/', this.newContact); this.contacts.unshift(res.data); this.selectSupplier(res.data); this.showAddModal = false; this.newContact = { name: '', phone: '', address: '' }; } catch(e) { const detail = e.response?.data ? JSON.stringify(e.response.data) : "网络错误"; alert("添加失败: " + detail); } },
+            previewImage(e) { const file = e.target.files[0]; if(file) { const reader = new FileReader(); reader.onload = (e) => this.imgPreview = e.target.result; reader.readAsDataURL(file); } },
+            get showConfig() { return !['SJ', 'ZX'].includes(this.form.category); },
+            get labels() { const c = this.form.category; if(['PH', 'TB'].includes(c)) return { l1: '品牌', l2: '型号', l3: '容量', l4: '颜色/版本' }; if(c === 'XS') return { l1: '品牌', l2: '尺寸', l3: '刷新率', l4: '面板/分辨率' }; return { l1: 'CPU', l2: '内存', l3: '硬盘', l4: '显卡 (空=核显)' }; },
+            get placeholders() { const c = this.form.category; if(['PH', 'TB'].includes(c)) return { p1: 'Apple/华为', p2: 'iPhone 15', p3: '256G', p4: '黑色/国行' }; if(c === 'XS') return { p1: '三星/AOC', p2: '27英寸', p3: '144Hz', p4: 'IPS/4K' }; return { p1: 'i5-12400F', p2: '16G', p3: '512G', p4: 'RTX3060' }; },
+            get configTitle() { const c = this.form.category; if(c === 'PH') return '📱 手机参数'; if(c === 'TB') return '📟 平板参数'; if(c === 'XS') return '📺 显示器参数'; return '🖥️ 详细配置单'; },
+            get notePlaceholder() { if(['PH', 'TB'].includes(this.form.category)) return "例如：电池98% / 屏幕无划痕 / 在保"; return "例如：海景房机箱 / 99新"; },
             
-            // 🟢 动态逻辑：根据分类变化的标签
-            get labels() {
-                const c = this.form.category;
-                if(['PH', 'TB'].includes(c)) return { l1: '品牌', l2: '型号', l3: '容量', l4: '颜色/版本' };
-                if(c === 'XS') return { l1: '品牌', l2: '尺寸', l3: '刷新率', l4: '面板/分辨率' };
-                return { l1: 'CPU', l2: '内存', l3: '硬盘', l4: '显卡 (空=核显)' };
-            },
-            
-            get placeholders() {
-                const c = this.form.category;
-                if(['PH', 'TB'].includes(c)) return { p1: 'Apple/华为', p2: 'iPhone 15', p3: '256G', p4: '黑色/国行' };
-                if(c === 'XS') return { p1: '三星/AOC', p2: '27英寸', p3: '144Hz', p4: 'IPS/4K' };
-                return { p1: 'i5-12400F', p2: '16G', p3: '512G', p4: 'RTX3060' };
-            },
-            
-            get configTitle() {
-                const c = this.form.category;
-                if(c === 'PH') return '📱 手机参数';
-                if(c === 'TB') return '📟 平板参数';
-                if(c === 'XS') return '📺 显示器参数';
-                return '🖥️ 详细配置单';
-            },
-            
-            get notePlaceholder() {
-                if(['PH', 'TB'].includes(this.form.category)) return "例如：电池98% / 屏幕无划痕 / 在保";
-                return "例如：海景房机箱 / 99新";
-            },
-
+            // 🟢 动态 Placeholder
             get snPlaceholder() {
-                if(['PH', 'TB'].includes(this.form.category)) return "📱 请扫描/输入 IMEI (必填)";
-                return "扫码或手动输入 (留空则自动生成)";
+                if(this.form.need_sn) return "📱 必须扫描/输入 IMEI";
+                return "选填，留空自动生成流水号";
             },
 
-            // 🟢 自动生成名称
-            generateName() {
-                const c = this.form.category;
-                if (['SJ', 'ZX'].includes(c)) return; // 散件不自动生成
-
-                const { cpu, ram, disk, gpu, note } = this.form;
-                const parts = [];
-                
-                // 手机/平板/显示器逻辑
-                if (['PH', 'TB', 'XS'].includes(c)) {
-                    if(cpu) parts.push(cpu); if(ram) parts.push(ram); if(disk) parts.push(disk); if(gpu) parts.push(gpu);
-                } else {
-                    // 电脑逻辑
-                    if(cpu) parts.push(cpu); if(ram) parts.push(ram); if(disk) parts.push(disk);
-                    if(gpu) parts.push(gpu); else if(cpu) parts.push("核显主机");
-                }
-                
-                if(note) parts.push(note);
-                this.form.name = parts.join(' ');
-            },
-
-            // 提交表单
+            generateName() { const c = this.form.category; if (['SJ', 'ZX'].includes(c)) return; const { cpu, ram, disk, gpu, note } = this.form; const parts = []; if (['PH', 'TB', 'XS'].includes(c)) { if(cpu) parts.push(cpu); if(ram) parts.push(ram); if(disk) parts.push(disk); if(gpu) parts.push(gpu); } else { if(cpu) parts.push(cpu); if(ram) parts.push(ram); if(disk) parts.push(disk); if(gpu) parts.push(gpu); else if(cpu) parts.push("核显主机"); } if(note) parts.push(note); this.form.name = parts.join(' '); },
+            
             async submit() {
                 if(!this.form.name || !this.form.cost_price) return alert("名称和成本必填");
-                if(['PH', 'TB'].includes(this.form.category) && !this.form.sn) return alert("📱 手机/平板必须填写 IMEI/序列号！");
+                // 🟢 校验：如果必须序列号且只有1个，强制填SN
+                if(this.form.quantity == 1 && this.form.need_sn && !this.form.sn) return alert("📱 必须填写 IMEI/序列号！");
 
                 this.submitting = true;
-                
-                // 构建 FormData
                 const fd = new FormData();
-                fd.append('supplier_id', this.form.supplier_id);
-                fd.append('category', this.form.category);
-                fd.append('name', this.form.name);
-                fd.append('sn', this.form.sn);
-                fd.append('cost_price', this.form.cost_price);
-                fd.append('note', this.form.note);
-                fd.append('cpu', this.form.cpu); fd.append('gpu', this.form.gpu);
-                fd.append('ram', this.form.ram); fd.append('disk', this.form.disk);
-                fd.append('peer_price', this.form.peer_price || 0);
-                fd.append('retail_price', this.form.retail_price || 0);
-                fd.append('paid_amount', this.form.paid_amount || 0);
-                fd.append('account_id', this.form.account_id || '');
+                fd.append('supplier_id', this.form.supplier_id); fd.append('category', this.form.category); fd.append('name', this.form.name); fd.append('sn', this.form.sn);
+                fd.append('cost_price', this.form.cost_price); fd.append('note', this.form.note); fd.append('cpu', this.form.cpu); fd.append('gpu', this.form.gpu); fd.append('ram', this.form.ram); fd.append('disk', this.form.disk);
+                fd.append('peer_price', this.form.peer_price || 0); fd.append('retail_price', this.form.retail_price || 0); fd.append('paid_amount', this.form.paid_amount || 0); fd.append('account_id', this.form.account_id || '');
+                // 🟢 传新参数
+                fd.append('quantity', this.form.quantity);
+                fd.append('need_sn', this.form.need_sn);
                 
                 const file = this.$refs.imageInput.files[0];
                 if(file) fd.append('image', file);
 
                 try {
                     const res = await axios.post('/api/products/', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
-                    this.resZencode = res.data.zencode;
-                    this.resName = res.data.name;
-                    this.showSuccess = true;
-                } catch(e) {
-                    const detail = e.response?.data ? JSON.stringify(e.response.data) : e.message;
-                    alert("入库失败: " + detail);
-                } finally {
-                    this.submitting = false;
-                }
+                    this.resZencode = res.data.zencode; this.resName = res.data.name; this.showSuccess = true;
+                } catch(e) { const detail = e.response?.data ? JSON.stringify(e.response.data) : e.message; alert("入库失败: " + detail); } finally { this.submitting = false; }
             }
         }
     }

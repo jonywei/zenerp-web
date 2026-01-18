@@ -7,7 +7,6 @@ class CapitalAccountSerializer(serializers.ModelSerializer):
     class Meta:
         model = CapitalAccount
         fields = '__all__'
-        # 🟢 关键修复：防止前端没传 tenant 报错
         read_only_fields = ['id', 'tenant']
 
 # 🟢 员工管理序列化
@@ -37,7 +36,6 @@ class ProductSerializer(serializers.ModelSerializer):
     class Meta: 
         model = Product
         fields = '__all__'
-        # 🟢 关键修复：入库时不需要前端传 tenant
         read_only_fields = ['id', 'tenant', 'created_at']
     
     def get_color_tag(self, obj): return 'green' 
@@ -50,7 +48,6 @@ class ContactSerializer(serializers.ModelSerializer):
     class Meta: 
         model = Contact
         fields = '__all__'
-        # 🟢 核心修复：这里！把 tenant 设为只读，前端不传就不会报 400 错了
         read_only_fields = ['id', 'tenant', 'balance', 'created_at']
 
 class RentalContractSerializer(serializers.ModelSerializer):
@@ -68,3 +65,10 @@ class TransactionSerializer(serializers.ModelSerializer):
         model = Transaction
         fields = '__all__'
         read_only_fields = ['id', 'tenant']
+
+# 🟢 新增：库存明细序列化 (解决 502 报错的关键)
+class StockItemSerializer(serializers.ModelSerializer):
+    product_name = serializers.CharField(source='product.name', read_only=True)
+    class Meta:
+        model = StockItem
+        fields = '__all__'

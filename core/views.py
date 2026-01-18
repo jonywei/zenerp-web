@@ -13,9 +13,10 @@ from django.views.decorators.csrf import csrf_exempt
 import json
 from datetime import timedelta
 
-# 引入您项目原本的模型
+# 引入模型
 from core.models import Product, Contact, RentalContract, Transaction, CapitalAccount, CustomUser, Tenant, StockItem
-from core.serializers import ProductSerializer, ContactSerializer, RentalContractSerializer, TransactionSerializer, StaffSerializer, TenantSerializer, CapitalAccountSerializer
+# 🟢 引入 StockItemSerializer (请确保在 serializers.py 里加了它)
+from core.serializers import ProductSerializer, ContactSerializer, RentalContractSerializer, TransactionSerializer, StaffSerializer, TenantSerializer, CapitalAccountSerializer, StockItemSerializer
 
 class CsrfExemptSessionAuthentication(SessionAuthentication):
     def enforce_csrf(self, request): return
@@ -134,8 +135,47 @@ class CapitalAccountViewSet(TenantAwareViewSet):
         qs = self.get_queryset()
         return Response([{'id': a.id, 'name': a.name, 'balance': a.current_balance} for a in qs])
 
+# 🟢 新增：库存明细管理 (用于待入库转正)
+class StockItemViewSet(TenantAwareViewSet):
+    queryset = StockItem.objects.all().order_by('-id')
+    serializer_class = StockItemSerializer
+    filter_backends = [filters.SearchFilter]
+    search_fields = ['sn', 'product__name']
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        # 支持按状态筛选 (例如只查 PENDING 待入库的)
+        status_param = self.request.query_params.get('status')
+        if status_param:
+            qs = qs.filter(status=status_param)
+        return qs
+
+    # 🟢 扫码转正接口 (单个或批量)
+    @action(detail=False, methods=['post'])
+    def confirm(self, request):
+        # 接收 id 和 real_sn
+        item_id = request.data.get('id')
+        real_sn = request.data.get('real_sn')
+        
+        try:
+            item = StockItem.objects.get(id=item_id, tenant=request.user.tenant)
+            
+            # 1. 更新为真实SN
+            item.sn = real_sn
+            # 2. 状态改为在库
+            item.status = 'IN_STOCK'
+            item.save()
+            
+            # 3. 这里可以补充财务逻辑
+            # 如果是"确认收货"才付款，可以在这里补 Transaction
+            # 但为了简单，建议入库时已记录(应付)，这里只是核销库存状态
+            
+            return Response({'status': 'ok', 'msg': '入库成功'})
+        except Exception as e:
+            return Response({'detail': str(e)}, 400)
+
+
 class ProductViewSet(TenantAwareViewSet):
-    # 🟢 排序修复：使用 -id 倒序，防止报错
     queryset = Product.objects.all().order_by('-id') 
     serializer_class = ProductSerializer
     filter_backends = [filters.SearchFilter]
@@ -148,109 +188,176 @@ class ProductViewSet(TenantAwareViewSet):
             qs = qs.filter(status=status_param)
         return qs
 
+    # 🟢 终极批量入库 (分场景处理)
     def create(self, request, *args, **kwargs):
         user = request.user; tenant = user.tenant
         if not tenant and not user.is_superuser: return Response({'detail': '无租户权限'}, 400)
         data = request.data.copy()
-        name = data.get('name'); category = data.get('category', 'ZX'); sn = data.get('sn'); 
-        cost_price = Decimal(str(data.get('cost_price', 0))) 
         
+        # 1. 获取参数
+        name = data.get('name')
+        category = data.get('category', 'ZX')
+        base_sn = data.get('sn') 
+        # 获取数量 (默认为1)
+        try: quantity = int(data.get('quantity', 1))
+        except: quantity = 1
+        
+        cost_unit = Decimal(str(data.get('cost_price', 0))) # 单价
+        paid_total = Decimal(str(data.get('paid_amount', 0) or 0)) # 总实付
+        
+        supplier_id = data.get('supplier_id')
+        acc_id = data.get('account_id')
+        
+        # 🟢 核心属性：是否必录SN (由前端传入，或默认False)
+        need_sn = data.get('need_sn', False) 
+        if str(need_sn).lower() == 'true': need_sn = True
+        else: need_sn = False
+
         with transaction.atomic():
-            # 1. 商品档案 (防止重复创建)
+            # A. 建立商品档案
             product, created = Product.objects.get_or_create(
                 name=name, category=category, tenant=tenant,
-                defaults={'cpu': data.get('cpu', ''), 'gpu': data.get('gpu', ''), 'ram': data.get('ram', ''), 'disk': data.get('disk', ''), 'note': data.get('note', ''), 'cost_price': cost_price, 'retail_price': data.get('retail_price', 0), 'zencode': self._gen_code(user, category)}
+                defaults={
+                    'cpu': data.get('cpu', ''), 'gpu': data.get('gpu', ''), 
+                    'ram': data.get('ram', ''), 'disk': data.get('disk', ''), 
+                    'note': data.get('note', ''), 
+                    'cost_price': cost_unit, 'retail_price': data.get('retail_price', 0), 
+                    'zencode': self._gen_code(user, category),
+                    'need_sn': need_sn # 记录该商品属性
+                }
             )
             if not created: 
-                product.cost_price = cost_price
-            product.status = 'IN_STOCK' 
+                product.cost_price = cost_unit
+                product.need_sn = need_sn
+            product.status = 'IN_STOCK'
             product.save()
 
-            # 2. 物理库存
-            final_sn = sn if sn else f"AUTO-{timezone.now().strftime('%Y%m%d%H%M%S')}"
-            StockItem.objects.create(tenant=tenant, product=product, sn=final_sn, real_cost=cost_price, status='IN_STOCK', supplier_id=data.get('supplier_id') if data.get('supplier_id')!='0' else None, note=data.get('note', ''))
+            # B. 批量创建库存 (分场景)
             
-            # 3. 财务与抵扣
-            self._handle_finance(request, product, cost_price)
+            # 场景1：iPhone (需要SN) -> 状态 PENDING, SN=WAIT-xxx
+            if need_sn:
+                status_code = 'PENDING'
+                sn_prefix = 'WAIT'
+            # 场景2：废品 (不需要SN) -> 状态 IN_STOCK, SN=AUTO-xxx
+            else:
+                status_code = 'IN_STOCK'
+                sn_prefix = 'AUTO' if not base_sn else base_sn
+
+            for i in range(quantity):
+                if need_sn:
+                    # 待录入，生成占位符
+                    final_sn = f"{sn_prefix}-{timezone.now().strftime('%H%M%S%f')}-{i+1}"
+                else:
+                    # 直接入库，自动生成流水号
+                    if base_sn:
+                        final_sn = base_sn if quantity == 1 else f"{base_sn}-{i+1}"
+                    else:
+                        final_sn = f"AUTO-{timezone.now().strftime('%Y%m%d%H%M%S%f')}-{i+1}"
+                
+                StockItem.objects.create(
+                    tenant=tenant, product=product, sn=final_sn, 
+                    real_cost=cost_unit, status=status_code, 
+                    supplier_id=supplier_id if str(supplier_id)!='0' else None, 
+                    note=data.get('note', '')
+                )
+
+            # C. 财务流水
+            # 只有当选择了供应商时，才记录
+            if supplier_id and str(supplier_id) != '0':
+                # 🟢 逻辑优化：如果是 PENDING 状态，是否记账？
+                # 魏总指示：要输入50个序列号进去。
+                # 通常：Pending状态不应触发财务扣款，因为货没点清。
+                # 但如果用户在入库时填了“实付金额”，说明已经打款了，必须记账！
+                # 所以：只要有 paid_total，就必须记 Transaction。
+                
+                try:
+                    sup = Contact.objects.get(id=supplier_id)
+                    
+                    # 1. 记录实付流水 (不管货在哪，钱付了就要记)
+                    if acc_id and paid_total > 0:
+                        acc = CapitalAccount.objects.get(id=acc_id)
+                        remark_str = f"采购: {product.name} x {quantity} (含待入库)"
+                        Transaction.objects.create(
+                            tenant=tenant, contact=sup, product=product, account=acc, 
+                            amount=paid_total, type='BUY', operator=user, remark=remark_str
+                        )
+                        acc.current_balance -= paid_total; acc.save()
+                    
+                    # 2. 自动抵扣欠款
+                    # 只有 IN_STOCK 的商品才算应付？
+                    # 不，只要单子开了，就算应付。
+                    total_cost = cost_unit * quantity
+                    debt = total_cost - paid_total
+                    if debt != 0:
+                        sup.balance -= debt; sup.save()
+                except: pass
+
             return Response(self.get_serializer(product).data, status=status.HTTP_201_CREATED)
 
     def _gen_code(self, user, cat):
         initials = getattr(user, 'initials', 'AD'); dt = timezone.now(); prefix = f"{str(dt.year)[-2:]}{dt.month}{dt.day:02d}{initials}{cat}"
         count = Product.objects.filter(category=cat, tenant=user.tenant).count() + 1; return f"{prefix}{count}"
 
-    def _handle_finance(self, request, product, amount):
-        supplier_id = request.data.get('supplier_id')
-        paid = Decimal(str(request.data.get('paid_amount', 0) or 0))
-        acc_id = request.data.get('account_id')
-        
-        if supplier_id and str(supplier_id) != '0':
-            try:
-                sup = Contact.objects.get(id=supplier_id)
-                if acc_id:
-                    acc = CapitalAccount.objects.get(id=acc_id)
-                    Transaction.objects.create(tenant=request.user.tenant, contact=sup, product=product, account=acc, amount=paid, type='BUY', operator=request.user, remark=f"采购: {product.name}")
-                    if paid > 0: 
-                        acc.current_balance -= paid; acc.save()
-                
-                # 🟢 自动抵扣 (欠款 = 采购额 - 已付)
-                debt = amount - paid
-                if debt != 0: 
-                    sup.balance -= debt 
-                    sup.save()
-            except: pass
-
+    # 🟢 批量销售逻辑 (自动扣减先进先出)
     @action(detail=True, methods=['post'])
     def sell(self, request, pk=None):
         product = self.get_object(); user = request.user
-        stock = StockItem.objects.filter(product=product, status='IN_STOCK', tenant=user.tenant).first()
-        if not stock: return Response({'detail': '库存不足或商品已售'}, 400)
         
-        price = Decimal(str(request.data.get('price')))
-        received = Decimal(str(request.data.get('received_amount', 0) or 0))
+        try: quantity = int(request.data.get('quantity', 1))
+        except: quantity = 1
+        
+        # 自动找出最早入库的 N 个 (且必须是 IN_STOCK)
+        stocks = StockItem.objects.filter(product=product, status='IN_STOCK', tenant=user.tenant).order_by('id')[:quantity]
+        
+        if stocks.count() < quantity:
+            return Response({'detail': f'库存不足！当前仅剩 {stocks.count()} 台，无法卖出 {quantity} 台'}, 400)
+        
+        unit_price = Decimal(str(request.data.get('price')))
+        received_total = Decimal(str(request.data.get('received_amount', 0) or 0))
         contact_id = request.data.get('contact_id'); acc_id = request.data.get('account_id')
         
         try:
             with transaction.atomic():
-                stock.status='SOLD'; stock.save()
-                product.status='SOLD'; product.sold_price=price; product.save()
+                # A. 批量扣减
+                for s in stocks:
+                    s.status = 'SOLD'
+                    s.save()
                 
+                # B. 记账
                 contact = Contact.objects.get(id=contact_id)
                 acc = CapitalAccount.objects.get(id=acc_id) if acc_id else None
-                Transaction.objects.create(tenant=user.tenant, contact=contact, product=product, account=acc, amount=received, type='SALE', operator=user, remark=f"销售: {product.name} ({stock.sn})")
+                remark_str = f"销售: {product.name} x {quantity}"
                 
-                if acc and received > 0: 
-                    acc.current_balance += received; acc.save()
+                Transaction.objects.create(
+                    tenant=user.tenant, contact=contact, product=product, account=acc, 
+                    amount=received_total, type='SALE', operator=user, remark=remark_str
+                )
                 
-                # 🟢 自动抵扣 (债权 = 售价 - 已收)
-                contact.balance += (price - received)
+                if acc and received_total > 0: 
+                    acc.current_balance += received_total; acc.save()
+                
+                # C. 抵扣
+                total_sell_price = unit_price * quantity
+                debt = total_sell_price - received_total
+                contact.balance += debt
                 contact.save()
                 
                 return Response({'msg': 'OK'})
         except Exception as e: return Response({'detail': str(e)}, 500)
 
 class ContactViewSet(TenantAwareViewSet):
-    # 🟢 排序修复：使用 -id 倒序，防止报错
     queryset = Contact.objects.all().order_by('-id') 
     serializer_class = ContactSerializer
     filter_backends = [filters.SearchFilter]
     search_fields = ['name', 'phone']
     
-    # 🟢🟢🟢 新增防重名逻辑 🟢🟢🟢
-    # 解决网络卡顿导致重复点击、生成多个同名供应商的问题
+    # 防重名
     def create(self, request, *args, **kwargs):
         user = request.user
         if not user.tenant: return Response({'detail': '无租户信息'}, 400)
-        
         name = request.data.get('name')
-        
-        # 1. 检查是否存在同名 (只在当前租户下查)
         existing = Contact.objects.filter(tenant=user.tenant, name=name).first()
-        
-        # 2. 如果存在，直接返回旧的，不报错，也不创建新的
-        if existing:
-            return Response(self.get_serializer(existing).data)
-            
-        # 3. 如果不存在，正常创建
+        if existing: return Response(self.get_serializer(existing).data)
         return super().create(request, *args, **kwargs)
 
     @action(detail=True, methods=['post'])
@@ -282,7 +389,7 @@ class AnalysisViewSet(viewsets.ViewSet):
         accounts = self._get_qs(CapitalAccount)
         items = self._get_qs(StockItem) 
 
-        # 🟢 修复1：库存货值只算 StockItem 中状态为 IN_STOCK 的
+        # 🟢 修复：库存货值只算 IN_STOCK (不含 PENDING)
         stock_val = items.filter(status='IN_STOCK').aggregate(Sum('real_cost'))['real_cost__sum'] or 0
         
         today_entry = items.filter(in_time__date=today).count()
@@ -291,14 +398,12 @@ class AnalysisViewSet(viewsets.ViewSet):
         def calc_sales(qs):
             total = 0
             for t in qs:
-                if t.type == 'SALE' and t.product and t.product.sold_price: total += t.product.sold_price
-                else: total += t.amount
+                total += t.amount
             return total
 
         today_txs = txs.filter(Q(type='SALE')|Q(type='RENT'), created_at__date=today).select_related('product')
         today_sale_amount = calc_sales(today_txs)
         
-        # 🟢 修复2：欠款逻辑
         receivable = contacts.filter(balance__gt=0).aggregate(Sum('balance'))['balance__sum'] or 0
         payable = contacts.filter(balance__lt=0).aggregate(Sum('balance'))['balance__sum'] or 0
         total_cash = accounts.aggregate(Sum('current_balance'))['current_balance__sum'] or 0
@@ -309,18 +414,13 @@ class AnalysisViewSet(viewsets.ViewSet):
             day_qs = txs.filter(Q(type='SALE')|Q(type='RENT'), created_at__date=day).select_related('product')
             days.append(day.strftime('%m-%d')); sales_data.append(float(calc_sales(day_qs)))
 
-        # 🟢 修复3：最近动态
         recent_txs = txs.select_related('product').order_by('-created_at')[:10]
         recent_list = []
         for t in recent_txs:
-            display_amt = t.amount
-            if t.type == 'SALE' and t.product and t.product.sold_price: display_amt = t.product.sold_price
-            elif t.type == 'BUY' and t.product: display_amt = t.product.cost_price
-            
             recent_list.append({
                 'id': t.id, 
                 'desc': f"{t.get_type_display()} - {t.product.name if t.product else (t.remark or '-')}", 
-                'amount': display_amt, 
+                'amount': t.amount, 
                 'is_income': t.type in ['SALE', 'RENT', 'OTHER'], 
                 'time': t.created_at.strftime('%m-%d %H:%M')
             })
@@ -353,7 +453,7 @@ class AnalysisViewSet(viewsets.ViewSet):
         
         total_sales = 0; total_cost = 0; list_data = []
         for t in txs.select_related('product', 'operator', 'contact').order_by('-created_at'):
-            sale_amt = t.product.sold_price if (t.product and t.product.sold_price) else t.amount
+            sale_amt = t.amount
             cost_amt = t.product.cost_price if t.product else 0
             profit = sale_amt - cost_amt
             total_sales += sale_amt; total_cost += cost_amt

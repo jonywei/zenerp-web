@@ -60,7 +60,7 @@ class Product(TenantAwareModel):
     name = models.CharField(max_length=200, verbose_name="商品名称")
     category = models.CharField(max_length=2, choices=TYPE_CHOICES, verbose_name="分类")
     
-    # 硬件参数 (保持原样，适配前端)
+    # 硬件参数
     cpu = models.CharField(max_length=50, blank=True, verbose_name="CPU/品牌")
     gpu = models.CharField(max_length=50, blank=True, verbose_name="显卡/颜色")
     ram = models.CharField(max_length=50, blank=True, verbose_name="内存/型号")
@@ -70,8 +70,11 @@ class Product(TenantAwareModel):
     cost_price = models.DecimalField(max_digits=10, decimal_places=2, default=0, verbose_name="参考成本")
     peer_price = models.DecimalField(max_digits=10, decimal_places=2, default=0, verbose_name="同行底价")
     retail_price = models.DecimalField(max_digits=10, decimal_places=2, default=0, verbose_name="零售指导")
-    sold_price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, verbose_name="实际成交价") # 保留字段
+    sold_price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, verbose_name="实际成交价")
     
+    # 🟢 新增：是否必须录入序列号 (控制批量入库逻辑)
+    need_sn = models.BooleanField(default=False, verbose_name="必须序列号")
+
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='IN_STOCK', verbose_name="整体状态")
     image = models.ImageField(upload_to='%Y/%m/', blank=True, null=True, verbose_name="图片")
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="入库时间")
@@ -80,29 +83,35 @@ class Product(TenantAwareModel):
     class Meta: verbose_name = "📂 商品档案(SPU)"; verbose_name_plural = verbose_name
 
 class StockItem(TenantAwareModel):
-    """【具体库存 (SKU)】新增表"""
+    """【具体库存 (SKU)】"""
     product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='stock_items', verbose_name="所属商品")
     sn = models.CharField(max_length=100, verbose_name="序列号/IMEI")
     real_cost = models.DecimalField(max_digits=10, decimal_places=2, default=0, verbose_name="真实入库价")
     
-    STATUS_CHOICES = (('IN_STOCK', '✅ 在库'), ('RENTED', '🔄 在租'), ('SOLD', '💰 已售'), ('BAD', '🚫 报废'))
+    # 🟢 修改：增加了 PENDING 状态
+    STATUS_CHOICES = (
+        ('IN_STOCK', '✅ 在库'), 
+        ('RENTED', '🔄 在租'), 
+        ('SOLD', '💰 已售'), 
+        ('BAD', '🚫 报废'),
+        ('PENDING', '⏳ 待入库') # 新增
+    )
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='IN_STOCK', verbose_name="当前状态")
-    supplier = models.ForeignKey('Contact', on_delete=models.SET_NULL, null=True, blank=True, verbose_name="供应商") # 新增供应商关联
+    supplier = models.ForeignKey('Contact', on_delete=models.SET_NULL, null=True, blank=True, verbose_name="供应商")
     note = models.CharField(max_length=200, blank=True, verbose_name="单机备注")
     in_time = models.DateTimeField(auto_now_add=True, verbose_name="入库时间")
 
     class Meta:
         verbose_name = "📦 库存实物(SKU)"; verbose_name_plural = verbose_name
-        unique_together = ('tenant', 'sn') # 同一租户下SN唯一
+        unique_together = ('tenant', 'sn') 
 
     def __str__(self): return f"{self.product.name} ({self.sn})"
 
     def status_tag(self):
-        # 兼容 admin 调用
         return self.get_status_display()
 
 # ==========================================
-# 💰 4. 财务与业务 (升级为多租户)
+# 💰 4. 财务与业务
 # ==========================================
 
 class CapitalAccount(TenantAwareModel):
@@ -115,7 +124,6 @@ class CapitalAccount(TenantAwareModel):
 class Contact(TenantAwareModel):
     name = models.CharField(max_length=50, verbose_name="姓名")
     phone = models.CharField(max_length=20, blank=True, verbose_name="电话")
-    # 🟢 修复：新增地址字段，解决400报错
     address = models.CharField(max_length=100, blank=True, verbose_name="地址/档口")
     balance = models.DecimalField(max_digits=10, decimal_places=2, default=0, verbose_name="余额")
     def __str__(self): return self.name
@@ -124,7 +132,7 @@ class Contact(TenantAwareModel):
 class RentalContract(TenantAwareModel):
     contact = models.ForeignKey(Contact, on_delete=models.CASCADE, verbose_name="客户")
     product = models.ForeignKey(Product, on_delete=models.CASCADE, verbose_name="租赁设备")
-    stock_item = models.ForeignKey(StockItem, on_delete=models.SET_NULL, null=True, blank=True, verbose_name="具体序列号") # 新增
+    stock_item = models.ForeignKey(StockItem, on_delete=models.SET_NULL, null=True, blank=True, verbose_name="具体序列号")
     operator = models.ForeignKey(CustomUser, on_delete=models.SET_NULL, null=True, verbose_name="经手人")
     
     start_date = models.DateField(default=timezone.now, verbose_name="起租日")
@@ -153,7 +161,7 @@ class Transaction(TenantAwareModel):
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="时间")
     class Meta: verbose_name = "财务流水"; verbose_name_plural = verbose_name
 
-# 7. 序列号工厂 (独立)
+# 7. 序列号工厂
 class SerialNumberFactory(TenantAwareModel):
     sn = models.CharField(max_length=100, verbose_name='序列号/IMEI')
     status = models.CharField(max_length=20, default='normal', verbose_name='状态')

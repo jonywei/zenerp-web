@@ -1,7 +1,7 @@
 from pathlib import Path
 import os
 # 🟢 新增：允许 CSRF 校验的域名白名单
-CSRF_TRUSTED_ORIGINS = ['https://erp.zengain.cn']
+CSRF_TRUSTED_ORIGINS = ['https://a.corezen.sit']
 BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = 'django-insecure-corezen-secret-key-change-me'
 DEBUG = True
@@ -73,7 +73,7 @@ DATABASES = {
         'NAME': os.environ.get('DB_NAME', 'zenerp'),
         'USER': os.environ.get('DB_USER', 'zenerp_admin'),
         'PASSWORD': os.environ.get('DB_PASSWORD', 'zenerp_secure_password'),
-        'HOST': os.environ.get('DB_HOST', 'zenerp_db'), # 注意这里对应 docker-compose 里的服务名
+        'HOST': os.environ.get('DB_HOST', '172.19.0.2'), # 注意这里对应 docker-compose 里的服务名
         'PORT': os.environ.get('DB_PORT', '5432'),
     }
 }
@@ -101,8 +101,8 @@ SIMPLEUI_ANALYSIS = False
 SIMPLEUI_DEFAULT_ICON = False
 
 # 🟢 1. 修改左侧菜单顶部的 Logo/文字
-SIMPLEUI_LOGO = 'zerp'   # 改为 zerp
-SIMPLEUI_HOME_TITLE = 'zerp 工作台'
+SIMPLEUI_LOGO = 'ZenERP'   # 改为 zerp
+SIMPLEUI_HOME_TITLE = 'ZenERP 工作台'
 SIMPLEUI_DEFAULT_THEME = 'admin.lte.css'
 
 # 🟢 2. 左侧菜单增加“返回工作台”
