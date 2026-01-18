@@ -5,7 +5,7 @@ from rest_framework.authentication import SessionAuthentication
 from django.utils import timezone
 from django.shortcuts import render, redirect
 from django.db import transaction
-from django.db.models import Sum, Q, Count
+from django.db.models import Sum, Q, F
 from decimal import Decimal
 from django.contrib.auth import authenticate, login, logout
 from django.http import JsonResponse
@@ -13,6 +13,7 @@ from django.views.decorators.csrf import csrf_exempt
 import json
 from datetime import timedelta
 
+# 引入您项目原本的模型
 from core.models import Product, Contact, RentalContract, Transaction, CapitalAccount, CustomUser, Tenant, StockItem
 from core.serializers import ProductSerializer, ContactSerializer, RentalContractSerializer, TransactionSerializer, StaffSerializer, TenantSerializer, CapitalAccountSerializer
 
@@ -134,7 +135,8 @@ class CapitalAccountViewSet(TenantAwareViewSet):
         return Response([{'id': a.id, 'name': a.name, 'balance': a.current_balance} for a in qs])
 
 class ProductViewSet(TenantAwareViewSet):
-    queryset = Product.objects.all().order_by('-created_at')
+    # 🟢 排序修复：使用 -id 倒序，防止报错
+    queryset = Product.objects.all().order_by('-id') 
     serializer_class = ProductSerializer
     filter_backends = [filters.SearchFilter]
     search_fields = ['name', 'zencode', 'note']
@@ -150,15 +152,25 @@ class ProductViewSet(TenantAwareViewSet):
         user = request.user; tenant = user.tenant
         if not tenant and not user.is_superuser: return Response({'detail': '无租户权限'}, 400)
         data = request.data.copy()
-        name = data.get('name'); category = data.get('category', 'ZX'); sn = data.get('sn'); cost_price = Decimal(str(data.get('cost_price', 0)))
+        name = data.get('name'); category = data.get('category', 'ZX'); sn = data.get('sn'); 
+        cost_price = Decimal(str(data.get('cost_price', 0))) 
+        
         with transaction.atomic():
+            # 1. 商品档案 (防止重复创建)
             product, created = Product.objects.get_or_create(
                 name=name, category=category, tenant=tenant,
                 defaults={'cpu': data.get('cpu', ''), 'gpu': data.get('gpu', ''), 'ram': data.get('ram', ''), 'disk': data.get('disk', ''), 'note': data.get('note', ''), 'cost_price': cost_price, 'retail_price': data.get('retail_price', 0), 'zencode': self._gen_code(user, category)}
             )
-            if not created: product.cost_price = cost_price; product.save()
+            if not created: 
+                product.cost_price = cost_price
+            product.status = 'IN_STOCK' 
+            product.save()
+
+            # 2. 物理库存
             final_sn = sn if sn else f"AUTO-{timezone.now().strftime('%Y%m%d%H%M%S')}"
             StockItem.objects.create(tenant=tenant, product=product, sn=final_sn, real_cost=cost_price, status='IN_STOCK', supplier_id=data.get('supplier_id') if data.get('supplier_id')!='0' else None, note=data.get('note', ''))
+            
+            # 3. 财务与抵扣
             self._handle_finance(request, product, cost_price)
             return Response(self.get_serializer(product).data, status=status.HTTP_201_CREATED)
 
@@ -167,37 +179,80 @@ class ProductViewSet(TenantAwareViewSet):
         count = Product.objects.filter(category=cat, tenant=user.tenant).count() + 1; return f"{prefix}{count}"
 
     def _handle_finance(self, request, product, amount):
-        supplier_id = request.data.get('supplier_id'); paid = Decimal(str(request.data.get('paid_amount', 0) or 0)); acc_id = request.data.get('account_id')
+        supplier_id = request.data.get('supplier_id')
+        paid = Decimal(str(request.data.get('paid_amount', 0) or 0))
+        acc_id = request.data.get('account_id')
+        
         if supplier_id and str(supplier_id) != '0':
             try:
                 sup = Contact.objects.get(id=supplier_id)
                 if acc_id:
                     acc = CapitalAccount.objects.get(id=acc_id)
                     Transaction.objects.create(tenant=request.user.tenant, contact=sup, product=product, account=acc, amount=paid, type='BUY', operator=request.user, remark=f"采购: {product.name}")
-                    if paid > 0: acc.current_balance -= paid; acc.save()
-                debt = amount - paid; 
-                if debt != 0: sup.balance -= debt; sup.save()
+                    if paid > 0: 
+                        acc.current_balance -= paid; acc.save()
+                
+                # 🟢 自动抵扣 (欠款 = 采购额 - 已付)
+                debt = amount - paid
+                if debt != 0: 
+                    sup.balance -= debt 
+                    sup.save()
             except: pass
 
     @action(detail=True, methods=['post'])
     def sell(self, request, pk=None):
         product = self.get_object(); user = request.user
         stock = StockItem.objects.filter(product=product, status='IN_STOCK', tenant=user.tenant).first()
-        if not stock: return Response({'detail': '库存不足'}, 400)
-        price = Decimal(str(request.data.get('price'))); received = Decimal(str(request.data.get('received_amount', 0) or 0))
+        if not stock: return Response({'detail': '库存不足或商品已售'}, 400)
+        
+        price = Decimal(str(request.data.get('price')))
+        received = Decimal(str(request.data.get('received_amount', 0) or 0))
         contact_id = request.data.get('contact_id'); acc_id = request.data.get('account_id')
+        
         try:
             with transaction.atomic():
-                stock.status='SOLD'; stock.save(); product.status='SOLD'; product.sold_price=price; product.save()
-                contact = Contact.objects.get(id=contact_id); acc = CapitalAccount.objects.get(id=acc_id) if acc_id else None
+                stock.status='SOLD'; stock.save()
+                product.status='SOLD'; product.sold_price=price; product.save()
+                
+                contact = Contact.objects.get(id=contact_id)
+                acc = CapitalAccount.objects.get(id=acc_id) if acc_id else None
                 Transaction.objects.create(tenant=user.tenant, contact=contact, product=product, account=acc, amount=received, type='SALE', operator=user, remark=f"销售: {product.name} ({stock.sn})")
-                if acc and received > 0: acc.current_balance += received; acc.save()
-                contact.balance += (price - received); contact.save()
+                
+                if acc and received > 0: 
+                    acc.current_balance += received; acc.save()
+                
+                # 🟢 自动抵扣 (债权 = 售价 - 已收)
+                contact.balance += (price - received)
+                contact.save()
+                
                 return Response({'msg': 'OK'})
         except Exception as e: return Response({'detail': str(e)}, 500)
 
 class ContactViewSet(TenantAwareViewSet):
-    queryset = Contact.objects.all(); serializer_class = ContactSerializer; filter_backends = [filters.SearchFilter]; search_fields = ['name', 'phone']
+    # 🟢 排序修复：使用 -id 倒序，防止报错
+    queryset = Contact.objects.all().order_by('-id') 
+    serializer_class = ContactSerializer
+    filter_backends = [filters.SearchFilter]
+    search_fields = ['name', 'phone']
+    
+    # 🟢🟢🟢 新增防重名逻辑 🟢🟢🟢
+    # 解决网络卡顿导致重复点击、生成多个同名供应商的问题
+    def create(self, request, *args, **kwargs):
+        user = request.user
+        if not user.tenant: return Response({'detail': '无租户信息'}, 400)
+        
+        name = request.data.get('name')
+        
+        # 1. 检查是否存在同名 (只在当前租户下查)
+        existing = Contact.objects.filter(tenant=user.tenant, name=name).first()
+        
+        # 2. 如果存在，直接返回旧的，不报错，也不创建新的
+        if existing:
+            return Response(self.get_serializer(existing).data)
+            
+        # 3. 如果不存在，正常创建
+        return super().create(request, *args, **kwargs)
+
     @action(detail=True, methods=['post'])
     def repay(self, request, pk=None): return Response({'msg':'ok'}) 
     @action(detail=True, methods=['get'])
@@ -206,7 +261,9 @@ class ContactViewSet(TenantAwareViewSet):
 class RentalViewSet(TenantAwareViewSet):
     queryset = RentalContract.objects.all().order_by('-id'); serializer_class = RentalContractSerializer
 
+# ==========================================
 # 🟢 全能分析接口
+# ==========================================
 class AnalysisViewSet(viewsets.ViewSet):
     authentication_classes = (CsrfExemptSessionAuthentication, )
     
@@ -223,9 +280,11 @@ class AnalysisViewSet(viewsets.ViewSet):
         txs = self._get_qs(Transaction)
         contacts = self._get_qs(Contact)
         accounts = self._get_qs(CapitalAccount)
-        items = self._get_qs(StockItem)
+        items = self._get_qs(StockItem) 
 
-        stock_val = products.filter(status='IN_STOCK').aggregate(Sum('cost_price'))['cost_price__sum'] or 0
+        # 🟢 修复1：库存货值只算 StockItem 中状态为 IN_STOCK 的
+        stock_val = items.filter(status='IN_STOCK').aggregate(Sum('real_cost'))['real_cost__sum'] or 0
+        
         today_entry = items.filter(in_time__date=today).count()
         today_sale_count = txs.filter(type='SALE', created_at__date=today).count()
 
@@ -239,6 +298,7 @@ class AnalysisViewSet(viewsets.ViewSet):
         today_txs = txs.filter(Q(type='SALE')|Q(type='RENT'), created_at__date=today).select_related('product')
         today_sale_amount = calc_sales(today_txs)
         
+        # 🟢 修复2：欠款逻辑
         receivable = contacts.filter(balance__gt=0).aggregate(Sum('balance'))['balance__sum'] or 0
         payable = contacts.filter(balance__lt=0).aggregate(Sum('balance'))['balance__sum'] or 0
         total_cash = accounts.aggregate(Sum('current_balance'))['current_balance__sum'] or 0
@@ -249,19 +309,13 @@ class AnalysisViewSet(viewsets.ViewSet):
             day_qs = txs.filter(Q(type='SALE')|Q(type='RENT'), created_at__date=day).select_related('product')
             days.append(day.strftime('%m-%d')); sales_data.append(float(calc_sales(day_qs)))
 
-        recent_txs = txs.select_related('product').order_by('-created_at')[:8]
+        # 🟢 修复3：最近动态
+        recent_txs = txs.select_related('product').order_by('-created_at')[:10]
         recent_list = []
         for t in recent_txs:
             display_amt = t.amount
-            
-            # 🟢 修复1：赊账销售，显示成交价
-            if t.type == 'SALE' and t.product and t.product.sold_price:
-                display_amt = t.product.sold_price
-            
-            # 🟢 修复2 (本次新增)：赊账采购，显示成本价
-            # 这样前端收到的就是 3320.00，而不是 0，也就不会显示“记录/业务”了
-            elif t.type == 'BUY' and t.product:
-                display_amt = t.product.cost_price
+            if t.type == 'SALE' and t.product and t.product.sold_price: display_amt = t.product.sold_price
+            elif t.type == 'BUY' and t.product: display_amt = t.product.cost_price
             
             recent_list.append({
                 'id': t.id, 
@@ -272,24 +326,17 @@ class AnalysisViewSet(viewsets.ViewSet):
             })
             
         return Response({
-            'cards': {
-                'stock_val': stock_val, 
-                'total_sales_amount': today_sale_amount, 
-                'receivable': receivable, 
-                'payable': abs(payable), 
-                'cash': total_cash
-            }, 
-            'today_entry': today_entry,
-            'today_sale': today_sale_count,
+            'cards': {'stock_val': stock_val, 'total_sales_amount': today_sale_amount, 'receivable': receivable, 'payable': abs(payable), 'cash': total_cash}, 
+            'today_entry': today_entry, 'today_sale': today_sale_count,
             'charts': {'trend': {'labels': days, 'data': sales_data}, 'category': {'labels': ['默认'], 'data': [1]}}, 
             'recent_list': recent_list
         })
 
     @action(detail=False)
     def accounting(self, request):
-        accounts = self._get_qs(CapitalAccount); products = self._get_qs(Product); contacts = self._get_qs(Contact)
+        accounts = self._get_qs(CapitalAccount); items = self._get_qs(StockItem); contacts = self._get_qs(Contact)
         total_cash = sum([a.current_balance for a in accounts]) or 0
-        stock_value = products.filter(status='IN_STOCK').aggregate(Sum('cost_price'))['cost_price__sum'] or 0
+        stock_value = items.filter(status='IN_STOCK').aggregate(Sum('real_cost'))['real_cost__sum'] or 0
         receivable = contacts.filter(balance__gt=0).aggregate(Sum('balance'))['balance__sum'] or 0
         payable = contacts.filter(balance__lt=0).aggregate(Sum('balance'))['balance__sum'] or 0
         net_worth = total_cash + stock_value + receivable + payable 
