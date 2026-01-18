@@ -14,13 +14,14 @@ import json
 from datetime import timedelta
 
 from core.models import Product, Contact, RentalContract, Transaction, CapitalAccount, CustomUser, Tenant, StockItem
-# 🟢 引入 CapitalAccountSerializer
 from core.serializers import ProductSerializer, ContactSerializer, RentalContractSerializer, TransactionSerializer, StaffSerializer, TenantSerializer, CapitalAccountSerializer
 
 class CsrfExemptSessionAuthentication(SessionAuthentication):
     def enforce_csrf(self, request): return
 
-# --- 页面路由配置 ---
+# ==========================================
+# 📄 1. 页面路由
+# ==========================================
 def index_page(request): return render(request, 'index.html') if request.user.is_authenticated else redirect('/login/')
 def login_page(request): return redirect('/') if request.user.is_authenticated else render(request, 'login.html')
 def register_page(request): return render(request, 'register.html')
@@ -38,7 +39,9 @@ def finance_page(request): return render(request, 'analysis_finance.html') if re
 def account_page(request): return render(request, 'analysis_account.html') if request.user.is_authenticated else redirect('/login/')
 def profile_page(request): return render(request, 'profile.html') if request.user.is_authenticated else redirect('/login/')
 
-# --- 核心基类 ---
+# ==========================================
+# 🧱 2. 核心基类
+# ==========================================
 class TenantAwareViewSet(viewsets.ModelViewSet):
     authentication_classes = (CsrfExemptSessionAuthentication, )
     def get_queryset(self):
@@ -51,14 +54,16 @@ class TenantAwareViewSet(viewsets.ModelViewSet):
         if self.request.user.tenant: serializer.save(tenant=self.request.user.tenant)
         else: serializer.save()
 
-# --- 老板管理接口 ---
+# ==========================================
+# 👤 3. 用户与租户管理
+# ==========================================
 class StaffViewSet(TenantAwareViewSet):
     queryset = CustomUser.objects.all().order_by('-date_joined')
     serializer_class = StaffSerializer
     def get_queryset(self): return super().get_queryset().exclude(id=self.request.user.id)
     def create(self, request, *args, **kwargs):
         user = request.user
-        if user.role != 'ADMIN': return Response({'detail': '只有老板可操作'}, status=403)
+        if user.role != 'ADMIN': return Response({'detail': '无权操作'}, status=403)
         curr = CustomUser.objects.filter(tenant=user.tenant).count()
         if curr >= user.tenant.account_limit: return Response({'detail': f'员工数已达上限({user.tenant.account_limit})'}, status=400)
         data = request.data
@@ -79,7 +84,9 @@ class MyTenantViewSet(viewsets.ViewSet):
         t = request.user.tenant; t.name = request.data.get('name', t.name); t.owner_name = request.data.get('owner_name', t.owner_name); t.save()
         return Response({'status': 'ok'})
 
-# --- 认证 API ---
+# ==========================================
+# 🔐 4. 认证接口
+# ==========================================
 @csrf_exempt
 def api_login(request):
     if request.method == 'POST':
@@ -115,10 +122,12 @@ def api_register(request):
         except Exception as e: return JsonResponse({'status': 'error', 'msg': str(e)})
     return JsonResponse({'status': 'error'})
 
-# --- 业务 API ---
+# ==========================================
+# 📦 5. 核心业务 ViewSet
+# ==========================================
+
 class CapitalAccountViewSet(TenantAwareViewSet):
     queryset = CapitalAccount.objects.all()
-    # 🟢 修复：引用正确的序列化器
     serializer_class = CapitalAccountSerializer 
     def list(self, request): 
         qs = self.get_queryset()
@@ -129,6 +138,13 @@ class ProductViewSet(TenantAwareViewSet):
     serializer_class = ProductSerializer
     filter_backends = [filters.SearchFilter]
     search_fields = ['name', 'zencode', 'note']
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        status_param = self.request.query_params.get('status')
+        if status_param and status_param != 'ALL':
+            qs = qs.filter(status=status_param)
+        return qs
 
     def create(self, request, *args, **kwargs):
         user = request.user; tenant = user.tenant
@@ -190,9 +206,7 @@ class ContactViewSet(TenantAwareViewSet):
 class RentalViewSet(TenantAwareViewSet):
     queryset = RentalContract.objects.all().order_by('-id'); serializer_class = RentalContractSerializer
 
-# ... (保留前面所有 Import 和 API 类，只替换最后的 AnalysisViewSet)
-
-# 🟢 全能分析接口：同时修复了Web端NaN和小程序查流水
+# 🟢 全能分析接口
 class AnalysisViewSet(viewsets.ViewSet):
     authentication_classes = (CsrfExemptSessionAuthentication, )
     
@@ -204,86 +218,123 @@ class AnalysisViewSet(viewsets.ViewSet):
     
     @action(detail=False)
     def dashboard(self, request):
-        # ... (Dashboard 逻辑略，保持原样或参照上文)
-        return Response({'stock_val':0, 'cards':{}}) # 占位，请用之前的完整代码
+        today = timezone.localtime(timezone.now()).date()
+        products = self._get_qs(Product)
+        txs = self._get_qs(Transaction)
+        contacts = self._get_qs(Contact)
+        accounts = self._get_qs(CapitalAccount)
+        items = self._get_qs(StockItem)
+
+        stock_val = products.filter(status='IN_STOCK').aggregate(Sum('cost_price'))['cost_price__sum'] or 0
+        today_entry = items.filter(in_time__date=today).count()
+        today_sale_count = txs.filter(type='SALE', created_at__date=today).count()
+
+        def calc_sales(qs):
+            total = 0
+            for t in qs:
+                if t.type == 'SALE' and t.product and t.product.sold_price: total += t.product.sold_price
+                else: total += t.amount
+            return total
+
+        today_txs = txs.filter(Q(type='SALE')|Q(type='RENT'), created_at__date=today).select_related('product')
+        today_sale_amount = calc_sales(today_txs)
+        
+        receivable = contacts.filter(balance__gt=0).aggregate(Sum('balance'))['balance__sum'] or 0
+        payable = contacts.filter(balance__lt=0).aggregate(Sum('balance'))['balance__sum'] or 0
+        total_cash = accounts.aggregate(Sum('current_balance'))['current_balance__sum'] or 0
+
+        days = []; sales_data = []
+        for i in range(6, -1, -1):
+            day = today - timedelta(days=i)
+            day_qs = txs.filter(Q(type='SALE')|Q(type='RENT'), created_at__date=day).select_related('product')
+            days.append(day.strftime('%m-%d')); sales_data.append(float(calc_sales(day_qs)))
+
+        recent_txs = txs.select_related('product').order_by('-created_at')[:8]
+        recent_list = []
+        for t in recent_txs:
+            display_amt = t.amount
+            
+            # 🟢 修复1：赊账销售，显示成交价
+            if t.type == 'SALE' and t.product and t.product.sold_price:
+                display_amt = t.product.sold_price
+            
+            # 🟢 修复2 (本次新增)：赊账采购，显示成本价
+            # 这样前端收到的就是 3320.00，而不是 0，也就不会显示“记录/业务”了
+            elif t.type == 'BUY' and t.product:
+                display_amt = t.product.cost_price
+            
+            recent_list.append({
+                'id': t.id, 
+                'desc': f"{t.get_type_display()} - {t.product.name if t.product else (t.remark or '-')}", 
+                'amount': display_amt, 
+                'is_income': t.type in ['SALE', 'RENT', 'OTHER'], 
+                'time': t.created_at.strftime('%m-%d %H:%M')
+            })
+            
+        return Response({
+            'cards': {
+                'stock_val': stock_val, 
+                'total_sales_amount': today_sale_amount, 
+                'receivable': receivable, 
+                'payable': abs(payable), 
+                'cash': total_cash
+            }, 
+            'today_entry': today_entry,
+            'today_sale': today_sale_count,
+            'charts': {'trend': {'labels': days, 'data': sales_data}, 'category': {'labels': ['默认'], 'data': [1]}}, 
+            'recent_list': recent_list
+        })
 
     @action(detail=False)
     def accounting(self, request):
-        accounts = self._get_qs(CapitalAccount)
-        # ... (计算净资产)
-        return Response({'accounts': [{'id': a.id, 'name': a.name, 'balance': a.current_balance} for a in accounts]})
+        accounts = self._get_qs(CapitalAccount); products = self._get_qs(Product); contacts = self._get_qs(Contact)
+        total_cash = sum([a.current_balance for a in accounts]) or 0
+        stock_value = products.filter(status='IN_STOCK').aggregate(Sum('cost_price'))['cost_price__sum'] or 0
+        receivable = contacts.filter(balance__gt=0).aggregate(Sum('balance'))['balance__sum'] or 0
+        payable = contacts.filter(balance__lt=0).aggregate(Sum('balance'))['balance__sum'] or 0
+        net_worth = total_cash + stock_value + receivable + payable 
+        return Response({'cash': total_cash, 'stock': stock_value, 'receivable': receivable, 'payable': abs(payable), 'net_worth': net_worth, 'accounts': [{'id': a.id, 'name': a.name, 'balance': a.current_balance} for a in accounts]})
     
-    # 🟢 核心修复：真实的利润计算逻辑 (解决 NaN)
     @action(detail=False)
     def profit_dashboard(self, request):
         if request.user.role == 'SALES': return Response({'detail': '无权访问'}, status=403)
-        
-        start = request.query_params.get('start_date')
-        end = request.query_params.get('end_date')
-        staff_id = request.query_params.get('staff_id')
-        
-        # 查销售流水
+        start = request.query_params.get('start_date'); end = request.query_params.get('end_date'); staff_id = request.query_params.get('staff_id')
         txs = self._get_qs(Transaction).filter(type='SALE')
         if start: txs = txs.filter(created_at__date__gte=start)
         if end: txs = txs.filter(created_at__date__lte=end)
         if staff_id: txs = txs.filter(operator_id=staff_id)
         
-        total_sales = 0
-        total_cost = 0
-        list_data = []
-        
-        # 关联查询优化
+        total_sales = 0; total_cost = 0; list_data = []
         for t in txs.select_related('product', 'operator', 'contact').order_by('-created_at'):
-            sale_amt = t.amount
+            sale_amt = t.product.sold_price if (t.product and t.product.sold_price) else t.amount
             cost_amt = t.product.cost_price if t.product else 0
             profit = sale_amt - cost_amt
-            
-            total_sales += sale_amt
-            total_cost += cost_amt
-            
+            total_sales += sale_amt; total_cost += cost_amt
             list_data.append({
                 'date': t.created_at.strftime('%Y-%m-%d'),
                 'product_name': t.product.name if t.product else '未知商品',
                 'zencode': t.product.zencode if t.product else '-',
                 'staff': t.operator.first_name if t.operator else '系统',
                 'customer': t.contact.name if t.contact else '散客',
-                'profit': profit
+                'profit': profit,
+                'sales': sale_amt 
             })
-            
-        total_profit = total_sales - total_cost
         
-        # 员工筛选列表
         staff_list = CustomUser.objects.filter(tenant=request.user.tenant, role='SALES').values('id', 'first_name', 'username')
         staff_opts = [{'id': u['id'], 'name': u['first_name'] or u['username']} for u in staff_list]
+        return Response({'summary': {'sales': total_sales, 'cost': total_cost, 'profit': total_sales - total_cost}, 'list': list_data, 'options': {'staff': staff_opts}})
 
-        return Response({
-            'summary': {
-                'sales': total_sales,
-                'cost': total_cost,
-                'profit': total_profit
-            },
-            'list': list_data,
-            'options': {'staff': staff_opts}
-        })
-
-    # 🟢 查流水接口 (小程序用)
     @action(detail=False)
     def account_history(self, request):
-        acc_id = request.query_params.get('id')
+        acc_id = request.query_params.get('id'); 
         if not acc_id: return Response([])
         txs = self._get_qs(Transaction).filter(account_id=acc_id).select_related('contact', 'product', 'operator').order_by('-created_at')
         data = []
         for t in txs:
-            is_income = t.type in ['SALE', 'RENT', 'OTHER']
+            is_income = t.type in ['SALE', 'RENT', 'OTHER']; 
             if t.type == 'BUY': is_income = False
             target = '-'
             if t.contact: target = t.contact.name
             elif t.product: target = t.product.name
-            data.append({
-                'id': t.id, 'date': t.created_at.strftime('%Y-%m-%d %H:%M'),
-                'type_name': t.get_type_display(), 'amount': t.amount,
-                'sign': '+' if is_income else '-', 'is_income': is_income,
-                'target': target, 'remark': t.remark or '-',
-                'operator': t.operator.first_name if t.operator else '系统'
-            })
+            data.append({'id': t.id, 'date': t.created_at.strftime('%Y-%m-%d %H:%M'), 'type_name': t.get_type_display(), 'amount': t.amount, 'sign': '+' if is_income else '-', 'is_income': is_income, 'target': target, 'remark': t.remark or '-', 'operator': t.operator.first_name if t.operator else '系统'})
         return Response(data)
