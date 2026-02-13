@@ -199,16 +199,32 @@
             
             async submit() {
                 if(!this.form.name || !this.form.cost_price) return alert("名称和成本必填");
-                // 🟢 校验：如果必须序列号且只有1个，强制填SN
                 if(this.form.quantity == 1 && this.form.need_sn && !this.form.sn) return alert("📱 必须填写 IMEI/序列号！");
 
                 this.submitting = true;
                 const fd = new FormData();
-                fd.append('supplier_id', this.form.supplier_id); fd.append('category', this.form.category); fd.append('name', this.form.name); fd.append('sn', this.form.sn);
-                fd.append('cost_price', this.form.cost_price); fd.append('note', this.form.note); fd.append('cpu', this.form.cpu); fd.append('gpu', this.form.gpu); fd.append('ram', this.form.ram); fd.append('disk', this.form.disk);
-                fd.append('peer_price', this.form.peer_price || 0); fd.append('retail_price', this.form.retail_price || 0); fd.append('paid_amount', this.form.paid_amount || 0); fd.append('account_id', this.form.account_id || '');
+                
+                // 🟢 核心修复：处理供应商ID
+                if (this.form.supplier_id && this.form.supplier_id != 0) {
+                    fd.append('supplier_id', this.form.supplier_id);
+                } else {
+                    fd.append('supplier_id', ''); 
+                }
+
+                fd.append('category', this.form.category);
+                fd.append('name', this.form.name);
+                fd.append('sn', this.form.sn || '');
+                fd.append('cost_price', this.form.cost_price);
+                fd.append('note', this.form.note);
+                fd.append('cpu', this.form.cpu); fd.append('gpu', this.form.gpu);
+                fd.append('ram', this.form.ram); fd.append('disk', this.form.disk);
+                fd.append('peer_price', this.form.peer_price || 0);
+                fd.append('retail_price', this.form.retail_price || 0);
+                fd.append('paid_amount', this.form.paid_amount || 0);
+                fd.append('account_id', this.form.account_id || '');
+                
                 // 🟢 传新参数
-                fd.append('quantity', this.form.quantity);
+                fd.append('quantity', this.form.quantity || 1);
                 fd.append('need_sn', this.form.need_sn);
                 
                 const file = this.$refs.imageInput.files[0];
@@ -216,8 +232,15 @@
 
                 try {
                     const res = await axios.post('/api/products/', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
-                    this.resZencode = res.data.zencode; this.resName = res.data.name; this.showSuccess = true;
-                } catch(e) { const detail = e.response?.data ? JSON.stringify(e.response.data) : e.message; alert("入库失败: " + detail); } finally { this.submitting = false; }
+                    this.resZencode = res.data.zencode;
+                    this.resName = res.data.name;
+                    this.showSuccess = true;
+                } catch(e) {
+                    const detail = e.response?.data ? JSON.stringify(e.response.data) : e.message;
+                    alert("入库失败: " + detail);
+                } finally {
+                    this.submitting = false;
+                }
             }
         }
     }
