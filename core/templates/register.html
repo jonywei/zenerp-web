@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>注册 - ZenERP</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+</head>
+<body class="bg-gray-50 h-screen flex items-center justify-center p-4">
+    <div class="bg-white p-8 rounded-2xl shadow-xl w-full max-w-md">
+        <h1 class="text-3xl font-black text-center text-blue-600 mb-6">商家入驻</h1>
+        <div class="space-y-4">
+            <input type="text" id="company" class="w-full h-12 border rounded px-4" placeholder="公司名称">
+            <input type="text" id="name" class="w-full h-12 border rounded px-4" placeholder="负责人姓名">
+            <input type="text" id="phone" class="w-full h-12 border rounded px-4" placeholder="手机号 (作为登录账号)">
+            <input type="password" id="pwd" class="w-full h-12 border rounded px-4" placeholder="密码">
+            <button onclick="reg()" class="w-full h-12 bg-blue-600 text-white rounded font-bold">提交审核</button>
+        </div>
+        <div class="text-center mt-4"><a href="/login/" class="text-blue-500">已有账号？登录</a></div>
+    </div>
+    <script>
+        async function reg() {
+            try {
+                const res = await axios.post('/api/register/', { company_name: document.getElementById('company').value, name: document.getElementById('name').value, phone: document.getElementById('phone').value, password: document.getElementById('pwd').value });
+                if(res.data.status === 'ok') { alert('注册成功，请等待审核！'); location.href='/login/'; } else alert(res.data.msg);
+            } catch(e) { alert('错误'); }
+        }
+    </script>
+</body>
+</html>

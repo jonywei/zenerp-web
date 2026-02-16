@@ -1,0 +1,229 @@
+{% extends 'base.html' %}
+{% block title %}资金与单据{% endblock %}
+{% block content %}
+<div class="max-w-6xl mx-auto space-y-6">
+    <div class="flex flex-col md:flex-row justify-between items-center mb-6 gap-4">
+        <h1 class="text-2xl font-bold text-gray-800 border-l-4 border-yellow-500 pl-3">资金账户 & 单据中心</h1>
+        <button onclick="window.location.reload()" class="bg-gray-100 text-gray-600 px-4 py-2 rounded-lg text-sm font-bold hover:bg-gray-200">🔄 刷新数据</button>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6" id="accountCards">
+        <div class="col-span-3 text-center py-8 text-gray-400">正在加载资金账户...</div>
+    </div>
+    
+    <div class="bg-white shadow rounded-2xl border border-gray-100 overflow-hidden mt-8">
+        <div class="px-6 py-4 border-b border-gray-50 flex justify-between items-center bg-gray-50">
+            <h3 class="font-bold text-gray-700">单据流水明细</h3>
+            <select id="filterType" onchange="loadTransactions(1)" class="border rounded-lg px-3 py-1 text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none">
+                <option value="">全部流水</option>
+                <option value="in">仅显示收入 (+)</option>
+                <option value="out">仅显示支出 (-)</option>
+            </select>
+        </div>
+        
+        <div class="overflow-x-auto">
+            <table class="w-full text-left">
+                <thead class="bg-gray-50 text-gray-500 text-xs uppercase font-bold">
+                    <tr>
+                        <th class="px-6 py-3">时间</th>
+                        <th class="px-6 py-3">类型</th>
+                        <th class="px-6 py-3">对象 (客户/供应商)</th>
+                        <th class="px-6 py-3">账户</th>
+                        <th class="px-6 py-3">摘要 / 备注</th>
+                        <th class="px-6 py-3 text-right">金额</th>
+                        <th class="px-6 py-3 text-center">操作</th>
+                    </tr>
+                </thead>
+                <tbody id="txList" class="divide-y divide-gray-100 text-sm">
+                    <tr><td colspan="7" class="px-6 py-10 text-center text-gray-400">加载中...</td></tr>
+                </tbody>
+            </table>
+        </div>
+        
+        <div class="px-6 py-4 flex justify-between items-center bg-gray-50">
+            <button onclick="changePage(-1)" class="px-3 py-1 bg-white border rounded hover:bg-gray-100 text-xs">上一页</button>
+            <span id="pageInfo" class="text-xs text-gray-500">第 1 页</span>
+            <button onclick="changePage(1)" class="px-3 py-1 bg-white border rounded hover:bg-gray-100 text-xs">下一页</button>
+        </div>
+    </div>
+</div>
+
+<div id="editModal" class="fixed inset-0 bg-black bg-opacity-60 hidden z-50 flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl shadow-2xl p-6 w-96">
+        <h3 class="font-bold text-xl mb-4 text-gray-800">更正单据信息</h3>
+        <div class="space-y-4">
+            <input type="hidden" id="editId">
+            <div>
+                <label class="block text-xs font-bold text-gray-500 mb-1">金额</label>
+                <input id="editAmt" type="number" class="w-full border rounded-lg h-10 px-3 font-bold">
+            </div>
+            <div>
+                <label class="block text-xs font-bold text-gray-500 mb-1">日期</label>
+                <input id="editDate" type="date" class="w-full border rounded-lg h-10 px-3">
+            </div>
+            <div>
+                <label class="block text-xs font-bold text-gray-500 mb-1">备注</label>
+                <input id="editRemark" class="w-full border rounded-lg h-10 px-3">
+            </div>
+            <div>
+                <label class="block text-xs font-bold text-gray-500 mb-1">归属客户</label>
+                <select id="editContact" class="w-full border rounded-lg h-10 px-3 bg-white"></select>
+            </div>
+            <div>
+                <label class="block text-xs font-bold text-gray-500 mb-1">资金账户</label>
+                <select id="editAccount" class="w-full border rounded-lg h-10 px-3 bg-white"></select>
+            </div>
+        </div>
+        <div class="flex justify-end gap-3 mt-6">
+            <button onclick="closeEdit()" class="px-4 py-2 bg-gray-100 rounded-lg text-sm font-bold text-gray-600">取消</button>
+            <button onclick="submitCorrect()" class="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-bold shadow">保存更正</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    let curPage = 1;
+    let accountsData = [];
+    let contactsData = [];
+
+    async function init() {
+        // 1. 加载账户卡片
+        const res = await axios.get('/api/analysis/accounting/');
+        const data = res.data;
+        accountsData = data.accounts;
+        renderCards(data);
+        
+        // 2. 加载单据列表
+        loadTransactions(1);
+        
+        // 3. 预加载联系人 (为弹窗做准备)
+        const cRes = await axios.get('/api/contacts/?page_size=1000');
+        contactsData = cRes.data.results || cRes.data;
+    }
+
+    function renderCards(data) {
+        const div = document.getElementById('accountCards');
+        let html = `
+            <div class="bg-blue-50 p-5 rounded-2xl border border-blue-100">
+                <div class="text-xs font-bold text-blue-400 uppercase">当前现金总资产</div>
+                <div class="text-3xl font-black text-blue-600 mt-1">¥ ${parseFloat(data.cash).toLocaleString()}</div>
+            </div>
+        `;
+        data.accounts.forEach(a => {
+            html += `
+                <div class="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm hover:shadow-md transition">
+                    <div class="text-xs font-bold text-gray-400 uppercase">${a.name}</div>
+                    <div class="text-2xl font-bold text-gray-800 mt-1">¥ ${parseFloat(a.balance).toLocaleString()}</div>
+                </div>
+            `;
+        });
+        div.innerHTML = html;
+    }
+
+    async function loadTransactions(page) {
+        curPage = page;
+        const type = document.getElementById('filterType').value;
+        const tbody = document.getElementById('txList');
+        
+        tbody.innerHTML = `<tr><td colspan="7" class="px-6 py-10 text-center text-gray-400">加载中...</td></tr>`;
+        
+        try {
+            const res = await axios.get(`/api/transactions/?page=${page}&filter=${type}&t=${Date.now()}`);
+            const list = res.data.results;
+            
+            if(list.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="7" class="px-6 py-10 text-center text-gray-400">暂无记录</td></tr>`;
+                return;
+            }
+
+            tbody.innerHTML = list.map(item => {
+                const isVoid = item.is_void || item.remark.includes('【冲红');
+                const rowClass = isVoid ? 'bg-gray-50 opacity-60' : 'hover:bg-gray-50';
+                const delStyle = isVoid ? 'text-decoration: line-through;' : '';
+                
+                // 按钮: 仅非冲红单显示
+                const btns = isVoid ? '<span class="text-xs text-gray-400 italic">已作废</span>' : `
+                    <button onclick='openEdit(${JSON.stringify(item)})' class="text-blue-600 hover:text-blue-800 text-xs font-bold mr-2">更正</button>
+                    <button onclick='confirmVoid(${item.id})' class="text-red-500 hover:text-red-700 text-xs font-bold">作废</button>
+                `;
+
+                return `
+                <tr class="${rowClass} transition">
+                    <td class="px-6 py-4 text-gray-500 font-mono text-xs">${item.date}</td>
+                    <td class="px-6 py-4 font-bold text-xs"><span class="bg-gray-100 px-2 py-1 rounded text-gray-600">${item.type_name}</span></td>
+                    <td class="px-6 py-4 font-bold text-gray-700">${item.related_object}</td>
+                    <td class="px-6 py-4 text-gray-500 text-xs">${item.account_name}</td>
+                    <td class="px-6 py-4 text-gray-600 font-medium" style="${delStyle}">${item.remark}</td>
+                    <td class="px-6 py-4 text-right font-mono font-bold ${item.amount>0?'text-green-600':'text-red-600'}" style="${delStyle}">
+                        ${item.amount > 0 ? '+' : ''}${item.amount.toLocaleString()}
+                    </td>
+                    <td class="px-6 py-4 text-center">${btns}</td>
+                </tr>
+                `;
+            }).join('');
+            
+            document.getElementById('pageInfo').innerText = `第 ${page} 页`;
+        } catch(e) {
+            tbody.innerHTML = `<tr><td colspan="7" class="px-6 py-10 text-center text-red-400">加载失败</td></tr>`;
+        }
+    }
+
+    function changePage(delta) {
+        if(curPage + delta < 1) return;
+        loadTransactions(curPage + delta);
+    }
+
+    // --- 冲红逻辑 ---
+    async function confirmVoid(id) {
+        if(!confirm("确定要【作废冲红】此单据吗？\n系统将自动生成一笔反向资金，并回滚客户欠款。")) return;
+        try {
+            await axios.post(`/api/transactions/${id}/void/`);
+            alert("已成功作废冲红！");
+            init(); // 刷新全页
+        } catch(e) {
+            alert("操作失败");
+        }
+    }
+
+    // --- 更正逻辑 ---
+    function openEdit(item) {
+        document.getElementById('editId').value = item.id;
+        document.getElementById('editAmt').value = item.amount;
+        document.getElementById('editRemark').value = item.remark;
+        document.getElementById('editDate').value = item.raw_date || ''; // 需要后端支持返回 YYYY-MM-DD
+        
+        // 填充下拉框
+        const selC = document.getElementById('editContact');
+        selC.innerHTML = contactsData.map(c => `<option value="${c.id}" ${c.id==item.contact_id?'selected':''}>${c.name}</option>`).join('');
+        
+        const selA = document.getElementById('editAccount');
+        selA.innerHTML = accountsData.map(a => `<option value="${a.id}" ${a.id==item.account_id?'selected':''}>${a.name}</option>`).join('');
+        
+        document.getElementById('editModal').classList.remove('hidden');
+    }
+    
+    function closeEdit() { document.getElementById('editModal').classList.add('hidden'); }
+    
+    async function submitCorrect() {
+        const id = document.getElementById('editId').value;
+        const data = {
+            amount: document.getElementById('editAmt').value,
+            date: document.getElementById('editDate').value,
+            remark: document.getElementById('editRemark').value,
+            contact_id: document.getElementById('editContact').value,
+            account_id: document.getElementById('editAccount').value
+        };
+        
+        try {
+            await axios.post(`/api/transactions/${id}/correct/`, data);
+            alert("更正成功！");
+            closeEdit();
+            init();
+        } catch(e) {
+            alert("更正失败: " + e.response?.data?.detail);
+        }
+    }
+
+    init();
+</script>
+{% endblock %}
