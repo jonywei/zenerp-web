@@ -1,271 +1,266 @@
 {% extends 'base.html' %}
 {% block title %}销售开单{% endblock %}
 {% block content %}
+<div class="flex flex-col md:flex-row justify-between items-center mb-6 gap-4">
+    <h1 class="text-2xl font-bold text-gray-800 border-l-4 border-blue-600 pl-3">销售开单</h1>
+    <div class="flex gap-2 w-full md:w-auto">
+        <input type="text" id="searchInput" placeholder="搜索型号/编码/配置..." class="border rounded-xl px-4 py-2 text-sm w-full md:w-80 shadow-sm" oninput="filterList()">
+    </div>
+</div>
 
-<div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-visible" x-data="salesForm()">
-    <div class="p-6 border-b border-gray-100 bg-gray-50 flex justify-between items-center">
-        <h2 class="text-lg font-bold text-gray-800">✨ 商品销售出库 (智能版)</h2>
-        <span class="text-xs text-gray-400" x-text="loading ? '数据加载中...' : '准备就绪'"></span>
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" id="productList">
     </div>
 
-    <div class="p-6 space-y-6">
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-            
-            <div class="relative z-30">
-                <label class="block text-sm font-bold text-gray-700 mb-2">选择客户</label>
-                <div class="flex gap-2 h-12"> <div class="relative w-full h-full" @click.away="closeContactDropdown()">
-                        <input 
-                            type="text" 
-                            x-model="searchContact"
-                            @focus="contactOpen = true"
-                            @input="contactOpen = true"
-                            placeholder="输入姓名或电话搜索..."
-                            class="w-full h-full border border-gray-200 rounded-xl px-4 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition"
-                        >
-                        <div x-show="contactOpen" class="absolute left-0 right-0 mt-2 bg-white border border-gray-100 rounded-xl shadow-xl max-h-60 overflow-y-auto z-50" style="display: none;">
-                            <template x-for="c in filteredContacts" :key="c.id">
-                                <div @click="selectContact(c)" class="px-4 py-3 hover:bg-blue-50 cursor-pointer border-b border-gray-50 last:border-0 group">
-                                    <div class="flex justify-between items-center">
-                                        <span class="font-bold text-gray-800" x-text="c.name"></span>
-                                        <span class="text-xs text-gray-400 group-hover:text-blue-500" x-text="c.address || '无地址'"></span>
-                                    </div>
-                                    <div class="text-xs text-gray-400 mt-0.5" x-text="c.phone || '无电话'"></div>
-                                </div>
-                            </template>
-                            <div x-show="filteredContacts.length === 0" class="p-4 text-gray-400 text-center text-sm">无匹配客户</div>
-                        </div>
-                    </div>
-                    
-                    <button type="button" @click="showAddModal = true" class="w-12 h-full bg-blue-100 text-blue-600 rounded-xl font-bold hover:bg-blue-200 transition text-xl flex items-center justify-center flex-shrink-0 shadow-sm">+</button>
-                </div>
-            </div>
-
-            <div class="relative z-20">
-                <label class="block text-sm font-bold text-gray-700 mb-2">选择商品 (在库)</label>
-                <div class="relative h-12" @click.away="closeProductDropdown()">
-                    <input 
-                        type="text" 
-                        x-model="searchProduct"
-                        @focus="productOpen = true"
-                        @input="productOpen = true"
-                        placeholder="输入品名 / 串码 / 价格..."
-                        class="w-full h-full border border-gray-200 rounded-xl px-4 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition"
-                    >
-                    <div x-show="productOpen" class="absolute left-0 right-0 mt-2 bg-white border border-gray-100 rounded-xl shadow-xl max-h-60 overflow-y-auto z-50" style="display: none;">
-                        <template x-for="p in filteredProducts" :key="p.id">
-                            <div @click="selectProduct(p)" class="px-4 py-3 hover:bg-indigo-50 cursor-pointer border-b border-gray-50 last:border-0 group">
-                                <div class="flex justify-between">
-                                    <span class="font-bold text-gray-800" x-text="p.name"></span>
-                                    <span class="text-green-600 font-mono font-bold">¥<span x-text="p.cost_price"></span></span>
-                                </div>
-                                <div class="flex justify-between mt-1">
-                                    <span class="text-xs text-gray-400 bg-gray-100 px-1.5 rounded" x-text="p.zencode"></span>
-                                    <span class="text-xs text-gray-400">建议价: ¥<span x-text="p.suggested_price || p.cost_price"></span></span>
-                                </div>
-                            </div>
-                        </template>
-                        <div x-show="filteredProducts.length === 0" class="p-4 text-gray-400 text-center text-sm">无匹配商品</div>
-                    </div>
-                </div>
-            </div>
+<div id="sellModal" class="fixed inset-0 bg-black bg-opacity-60 hidden z-40 flex items-center justify-center p-4 backdrop-blur-sm">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden transform transition-all scale-100">
+        <div class="bg-gradient-to-r from-blue-600 to-blue-500 px-6 py-4 flex justify-between items-center">
+            <h3 class="text-white font-bold text-lg">商品出库 / 销售</h3>
+            <button onclick="closeModal()" class="text-white hover:bg-white hover:bg-opacity-20 rounded-full w-8 h-8 flex items-center justify-center transition">&times;</button>
         </div>
+        
+        <div class="p-6 space-y-4">
+            <div class="bg-blue-50 p-3 rounded-lg border border-blue-100">
+                <div class="font-bold text-gray-800" id="mName">--</div>
+                <div class="text-xs text-gray-500 mt-1 flex justify-between">
+                    <span id="mCode">--</span>
+                    <span class="bg-white px-2 rounded border text-blue-600" id="mCost">成本: --</span>
+                </div>
+            </div>
 
-        <div class="bg-blue-50 p-6 rounded-2xl border border-blue-100 grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div>
-                <label class="block text-xs font-bold text-blue-800 mb-2">成交价 (应收)</label>
-                <div class="relative">
-                    <span class="absolute left-3 top-1/2 -translate-y-1/2 text-blue-300 font-bold">¥</span>
-                    <input type="number" x-model="form.price" class="w-full h-12 rounded-xl border-blue-200 border pl-8 pr-4 font-bold text-blue-700 text-lg focus:ring-2 focus:ring-blue-500 outline-none transition">
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 mb-1">成交单价 (¥)</label>
+                    <input type="number" id="mPrice" class="w-full border-2 border-gray-200 rounded-lg px-3 py-2 font-bold text-gray-800 focus:border-blue-500 outline-none">
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 mb-1">实收金额 (¥)</label>
+                    <input type="number" id="mPaid" class="w-full border-2 border-gray-200 rounded-lg px-3 py-2 font-bold text-green-600 focus:border-green-500 outline-none" placeholder="0代表赊账">
                 </div>
             </div>
+
             <div>
-                <label class="block text-xs font-bold text-blue-800 mb-2">实收金额</label>
-                <div class="relative">
-                    <span class="absolute left-3 top-1/2 -translate-y-1/2 text-green-300 font-bold">¥</span>
-                    <input type="number" x-model="form.received_amount" class="w-full h-12 rounded-xl border-blue-200 border pl-8 pr-4 font-bold text-green-700 text-lg focus:ring-2 focus:ring-green-500 outline-none transition">
-                </div>
-            </div>
-            <div>
-                <label class="block text-xs font-bold text-blue-800 mb-2">收款账户</label>
-                <div class="relative">
-                    <select x-model="form.account_id" class="w-full h-12 rounded-xl border-blue-200 border px-4 text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none transition appearance-none">
-                        <template x-for="acc in accounts" :key="acc.id">
-                            <option :value="acc.id" x-text="acc.name"></option>
-                        </template>
+                <label class="block text-xs font-bold text-gray-500 mb-1">客户 / 买家</label>
+                <div class="flex gap-2">
+                    <select id="mContact" class="flex-1 border rounded-lg px-3 py-2 bg-gray-50 text-sm font-bold text-gray-700 focus:bg-white transition">
+                        <option value="">-- 请选择客户 --</option>
                     </select>
-                    <div class="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-blue-400">▼</div>
+                    <button onclick="showAddContact()" class="bg-blue-100 text-blue-600 px-3 rounded-lg hover:bg-blue-200 font-bold text-xl">+</button>
                 </div>
+            </div>
+
+            <div id="accBox">
+                <label class="block text-xs font-bold text-gray-500 mb-1">收款账户</label>
+                <select id="mAccount" class="w-full border rounded-lg px-3 py-2 bg-gray-50 text-sm">
+                    </select>
+            </div>
+            
+            <div id="debtTip" class="hidden bg-red-50 text-red-600 text-xs p-2 rounded border border-red-100 font-bold text-center">
+                ⚠️ 客户将挂账 ¥<span id="debtVal">0</span>，记入应收欠款
             </div>
         </div>
 
-        <button type="button" @click="submitForm()" :disabled="submitting" class="w-full bg-blue-600 text-white py-4 rounded-xl font-bold hover:bg-blue-700 shadow-lg hover:shadow-xl transition transform active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed">
-            <span x-show="!submitting">确认出库 (Enter)</span>
-            <span x-show="submitting">正在提交...</span>
-        </button>
+        <div class="px-6 py-4 bg-gray-50 border-t flex justify-end gap-3">
+            <button onclick="closeModal()" class="px-5 py-2 rounded-lg text-gray-600 hover:bg-gray-200 font-bold text-sm">取消</button>
+            <button onclick="confirmSell()" class="px-6 py-2 rounded-lg bg-blue-600 text-white shadow-lg hover:bg-blue-700 font-bold text-sm transform active:scale-95 transition">确认出售</button>
+        </div>
     </div>
+</div>
 
-    <div x-show="showAddModal" class="fixed inset-0 bg-black bg-opacity-40 z-50 flex items-center justify-center backdrop-blur-sm" style="display: none;" x-transition.opacity>
-        <div class="bg-white p-8 rounded-2xl w-full max-w-md shadow-2xl transform transition-all" @click.away="showAddModal = false" x-transition.scale>
-            <div class="flex justify-between items-center mb-6">
-                <h3 class="font-black text-xl text-gray-800">新增客户档案</h3>
-                <button @click="showAddModal = false" class="text-gray-400 hover:text-gray-600 transition text-2xl leading-none">&times;</button>
-            </div>
-            
-            <div class="space-y-4">
-                <div>
-                    <label class="block text-xs font-bold text-gray-500 mb-1">客户姓名 <span class="text-red-500">*</span></label>
-                    <input x-model="newContact.name" class="w-full border border-gray-200 rounded-xl h-12 px-4 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition" placeholder="例如：张三">
-                </div>
-                
-                <div>
-                    <label class="block text-xs font-bold text-gray-500 mb-1">联系电话</label>
-                    <input x-model="newContact.phone" class="w-full border border-gray-200 rounded-xl h-12 px-4 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition" placeholder="手机号 (选填)">
-                </div>
-
-                <div>
-                    <label class="block text-xs font-bold text-gray-500 mb-1">档口名称 / 地址</label>
-                    <input x-model="newContact.address" class="w-full border border-gray-200 rounded-xl h-12 px-4 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition" placeholder="例如：汉正街A栋101 (选填)">
-                </div>
-            </div>
-
-            <div class="flex justify-end gap-3 mt-8">
-                <button @click="showAddModal = false" class="px-5 py-2.5 bg-gray-100 rounded-xl text-sm font-bold text-gray-600 hover:bg-gray-200 transition">取消</button>
-                <button @click="saveNewContact()" class="px-6 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-bold hover:bg-blue-700 shadow-lg hover:shadow-xl transition">保存并选中</button>
-            </div>
+<div id="addContactModal" class="fixed inset-0 bg-black bg-opacity-60 hidden z-50 flex items-center justify-center p-4">
+    <div class="bg-white rounded-xl shadow-2xl p-6 w-80">
+        <h3 class="font-bold text-lg mb-4 text-gray-800">新建客户档案</h3>
+        <input id="newCName" class="w-full border rounded-lg h-10 px-3 mb-3 text-sm" placeholder="姓名 (必填)">
+        <input id="newCPhone" class="w-full border rounded-lg h-10 px-3 mb-3 text-sm" placeholder="电话">
+        <input id="newCAddress" class="w-full border rounded-lg h-10 px-3 mb-3 text-sm" placeholder="地址/备注">
+        <div class="flex justify-end gap-2 mt-2">
+            <button onclick="document.getElementById('addContactModal').classList.add('hidden')" class="px-4 py-2 bg-gray-100 rounded-lg text-sm font-bold text-gray-500">取消</button>
+            <button onclick="saveContact()" class="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-bold shadow">保存</button>
         </div>
     </div>
 </div>
 
 <script>
-    function salesForm() {
-        return {
-            loading: true,
-            submitting: false,
+    let products = [], contacts = [], accounts = [];
+    let currentProd = null;
+
+    // 初始化加载
+    async function init() {
+        try {
+            // 只加载库存中的商品
+            const [pRes, cRes, aRes] = await Promise.all([
+                axios.get('/api/products/?status=IN_STOCK&page_size=1000&t='+Date.now()),
+                axios.get('/api/contacts/?page_size=1000&t='+Date.now()),
+                axios.get('/api/analysis/accounting/?t='+Date.now())
+            ]);
+            products = pRes.data.results || pRes.data;
+            contacts = cRes.data.results || cRes.data;
+            accounts = aRes.data.accounts;
             
-            // 数据源
-            contacts: [],
-            products: [],
-            accounts: [],
-            
-            // 搜索状态
-            contactOpen: false,
-            searchContact: '',
-            
-            productOpen: false,
-            searchProduct: '',
-            
-            // 表单数据
-            form: {
-                contact_id: null,
-                product_id: null,
-                price: '',
-                received_amount: '',
-                account_id: null
-            },
-            
-            // 新增客户
-            showAddModal: false,
-            // 🟢 补全字段
-            newContact: { name: '', phone: '', address: '' },
-
-            async init() {
-                try {
-                    const [cRes, pRes, aRes] = await Promise.all([
-                        axios.get('/api/contacts/?page_size=1000&t='+Date.now()),
-                        axios.get('/api/products/?status=IN_STOCK&page_size=1000&t='+Date.now()),
-                        axios.get('/api/analysis/accounting/?t='+Date.now())
-                    ]);
-                    
-                    this.contacts = cRes.data.results || cRes.data;
-                    this.products = pRes.data.results || pRes.data;
-                    this.accounts = aRes.data.accounts || [];
-                    
-                    if (this.accounts.length > 0) {
-                        this.form.account_id = this.accounts[0].id;
-                    }
-                } catch (e) {
-                    console.error(e);
-                    alert("数据加载失败，请刷新页面");
-                } finally {
-                    this.loading = false;
-                }
-            },
-
-            // 搜索逻辑
-            get filteredContacts() {
-                if (this.searchContact === '') return this.contacts.slice(0, 10);
-                const keyword = this.searchContact.toLowerCase();
-                return this.contacts.filter(c => 
-                    c.name.toLowerCase().includes(keyword) || 
-                    (c.phone && c.phone.includes(keyword)) ||
-                    (c.address && c.address.toLowerCase().includes(keyword))
-                );
-            },
-
-            get filteredProducts() {
-                if (this.searchProduct === '') return this.products.slice(0, 10);
-                const keyword = this.searchProduct.toLowerCase();
-                return this.products.filter(p => 
-                    p.name.toLowerCase().includes(keyword) || 
-                    (p.zencode && p.zencode.toLowerCase().includes(keyword)) ||
-                    String(p.cost_price).includes(keyword)
-                );
-            },
-
-            selectContact(c) {
-                this.form.contact_id = c.id;
-                this.searchContact = c.name;
-                this.contactOpen = false;
-            },
-            
-            closeContactDropdown() { setTimeout(() => this.contactOpen = false, 200) },
-
-            selectProduct(p) {
-                this.form.product_id = p.id;
-                this.searchProduct = `[${p.zencode}] ${p.name}`;
-                this.form.price = p.suggested_price || p.cost_price;
-                this.form.received_amount = this.form.price;
-                this.productOpen = false;
-            },
-
-            closeProductDropdown() { setTimeout(() => this.productOpen = false, 200) },
-
-            // 新增客户提交
-            async saveNewContact() {
-                if(!this.newContact.name) return alert('请填写姓名');
-                try {
-                    const res = await axios.post('/api/contacts/', this.newContact);
-                    this.contacts.unshift(res.data);
-                    this.selectContact(res.data);
-                    this.showAddModal = false;
-                    this.newContact = { name: '', phone: '', address: '' };
-                } catch(e) {
-                    alert('添加失败，请重试');
-                }
-            },
-
-            async submitForm() {
-                if (!this.form.contact_id) return alert("请先搜索并选择一位客户");
-                if (!this.form.product_id) return alert("请先搜索并选择一个商品");
-                if (!this.form.price) return alert("请输入成交价");
-
-                this.submitting = true;
-                try {
-                    await axios.post(`/api/products/${this.form.product_id}/sell/`, {
-                        contact_id: this.form.contact_id,
-                        price: this.form.price,
-                        received_amount: this.form.received_amount || 0,
-                        account_id: this.form.account_id
-                    });
-                    alert("✅ 出库成功！");
-                    window.location.href = '/inventory/';
-                } catch (e) {
-                    alert("❌ 提交失败: " + (e.response?.data?.detail || "未知错误"));
-                } finally {
-                    this.submitting = false;
-                }
-            }
+            renderProducts(products);
+            renderContacts();
+            renderAccounts();
+        } catch (e) {
+            alert("数据加载失败，请刷新");
         }
     }
+
+    function renderProducts(list) {
+        const div = document.getElementById('productList');
+        if(list.length === 0) {
+            div.innerHTML = `<div class="col-span-full text-center py-20 text-gray-400 bg-gray-50 rounded-xl border-dashed border-2">暂无可售库存</div>`;
+            return;
+        }
+        div.innerHTML = list.map(p => `
+            <div class="bg-white p-4 rounded-xl border border-gray-100 shadow-sm hover:shadow-md transition group cursor-pointer" onclick="openSell(${p.id})">
+                <div class="flex gap-4">
+                    <div class="w-20 h-20 bg-gray-100 rounded-lg overflow-hidden flex-shrink-0">
+                        <img src="${p.image || 'https://via.placeholder.com/150'}" class="w-full h-full object-cover">
+                    </div>
+                    <div class="flex-1 min-w-0">
+                        <div class="flex justify-between items-start">
+                            <span class="bg-green-100 text-green-700 text-xs px-2 py-0.5 rounded font-bold">在库</span>
+                            <span class="font-bold text-orange-500">¥${parseFloat(p.retail_price||0).toLocaleString()}</span>
+                        </div>
+                        <h4 class="font-bold text-gray-800 truncate mt-1">${p.name}</h4>
+                        <p class="text-xs text-gray-400 mt-1 truncate">${p.zencode} | ${p.cpu} ${p.gpu}</p>
+                        <div class="mt-2 text-right">
+                            <button class="bg-blue-50 text-blue-600 px-3 py-1 rounded text-xs font-bold group-hover:bg-blue-600 group-hover:text-white transition">点击开单 ›</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    function renderContacts(selectedId = null) {
+        const sel = document.getElementById('mContact');
+        // 保留“散客”选项 (ID为0或空)
+        let html = '<option value="">-- 请选择客户 --</option>';
+        // 散客
+        const guest = contacts.find(c => c.name === '散客' || c.id === 0);
+        if(guest) html += `<option value="${guest.id}">🛒 散客</option>`;
+        
+        contacts.forEach(c => {
+            if(c.name !== '散客') {
+                html += `<option value="${c.id}">${c.name}</option>`;
+            }
+        });
+        sel.innerHTML = html;
+        if(selectedId) sel.value = selectedId;
+    }
+
+    function renderAccounts() {
+        const sel = document.getElementById('mAccount');
+        sel.innerHTML = accounts.map(a => `<option value="${a.id}">${a.name} (¥${a.balance})</option>`).join('');
+    }
+
+    function openSell(pid) {
+        currentProd = products.find(p => p.id === pid);
+        if(!currentProd) return;
+        
+        document.getElementById('mName').innerText = currentProd.name;
+        document.getElementById('mCode').innerText = currentProd.zencode;
+        // 只有管理员看成本 (简单逻辑)
+        document.getElementById('mCost').innerText = `成本: ¥${parseFloat(currentProd.cost_price).toLocaleString()}`;
+        
+        document.getElementById('mPrice').value = currentProd.retail_price || '';
+        document.getElementById('mPaid').value = '';
+        document.getElementById('sellModal').classList.remove('hidden');
+        
+        // 监听金额变化计算欠款
+        document.getElementById('mPrice').oninput = calcDebt;
+        document.getElementById('mPaid').oninput = calcDebt;
+        calcDebt();
+    }
+
+    function calcDebt() {
+        const price = parseFloat(document.getElementById('mPrice').value) || 0;
+        const paid = parseFloat(document.getElementById('mPaid').value) || 0;
+        const debt = price - paid;
+        const tip = document.getElementById('debtTip');
+        const acc = document.getElementById('accBox');
+        
+        if(debt > 0) {
+            tip.classList.remove('hidden');
+            document.getElementById('debtVal').innerText = debt.toLocaleString();
+        } else {
+            tip.classList.add('hidden');
+        }
+        
+        if(paid > 0) acc.classList.remove('hidden');
+        else acc.classList.add('hidden');
+    }
+
+    window.showAddContact = () => document.getElementById('addContactModal').classList.remove('hidden');
+    
+    // 🟢 修复：JS同步获取地址字段
+    async function saveContact() {
+        const name = document.getElementById('newCName').value;
+        const phone = document.getElementById('newCPhone').value;
+        const address = document.getElementById('newCAddress').value; // 获取地址
+        
+        if(!name) return alert("请填写姓名");
+        
+        try {
+            // 真正调用 API
+            const res = await axios.post('/api/contacts/', { name, phone, address }); // 发送地址
+            const newC = res.data;
+            
+            // 加入本地列表
+            contacts.unshift(newC);
+            // 刷新下拉框并选中
+            renderContacts(newC.id);
+            
+            document.getElementById('addContactModal').classList.add('hidden');
+            // 清空输入
+            document.getElementById('newCName').value = '';
+            document.getElementById('newCPhone').value = '';
+            document.getElementById('newCAddress').value = ''; // 清空地址
+            
+        } catch(e) {
+            alert("添加失败: " + (e.response?.data?.detail || e.message));
+        }
+    }
+
+    async function confirmSell() {
+        if(!currentProd) return;
+        const contactId = document.getElementById('mContact').value;
+        const price = document.getElementById('mPrice').value;
+        const paid = document.getElementById('mPaid').value || 0;
+        const accId = document.getElementById('mAccount').value;
+
+        if(!contactId) return alert("必须选择一个客户（如是路人请选散客）");
+        if(!price) return alert("请输入成交价");
+
+        try {
+            await axios.post(`/api/products/${currentProd.id}/sell/`, {
+                quantity: 1,
+                price: price,
+                received_amount: paid,
+                contact_id: contactId,
+                account_id: accId
+            });
+            
+            alert("开单成功！");
+            closeModal();
+            init(); // 刷新列表
+        } catch(e) {
+            alert("开单失败: " + (e.response?.data?.detail || e.message));
+        }
+    }
+
+    window.closeModal = () => document.getElementById('sellModal').classList.add('hidden');
+    
+    window.filterList = () => {
+        const k = document.getElementById('searchInput').value.toLowerCase();
+        const filtered = products.filter(p => 
+            p.name.toLowerCase().includes(k) || 
+            p.zencode.toLowerCase().includes(k) ||
+            (p.note && p.note.toLowerCase().includes(k))
+        );
+        renderProducts(filtered);
+    }
+
+    init();
 </script>
 {% endblock %}

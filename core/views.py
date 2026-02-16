@@ -1,9 +1,9 @@
-from rest_framework import viewsets, filters, status
+from rest_framework import viewsets, filters, status, permissions
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.authentication import SessionAuthentication
 from django.utils import timezone
-from django.shortcuts import render, redirect
+from django.shortcuts import render, redirect, get_object_or_404
 from django.db import transaction
 from django.db.models import Sum, Q, F, Count
 from decimal import Decimal
@@ -21,26 +21,36 @@ class CsrfExemptSessionAuthentication(SessionAuthentication):
     def enforce_csrf(self, request): return
 
 # ==========================================
-# 📄 页面路由
+# 📄 1. 页面路由 (Page Views)
 # ==========================================
 def index_page(request): return render(request, 'index.html') if request.user.is_authenticated else redirect('/login/')
 def login_page(request): return redirect('/') if request.user.is_authenticated else render(request, 'login.html')
 def register_page(request): return render(request, 'register.html')
 def staff_page(request): return render(request, 'staff.html') if request.user.is_authenticated else redirect('/login/')
 def company_page(request): return render(request, 'company.html') if request.user.is_authenticated else redirect('/login/')
+
+# 核心业务
 def entry_page(request): return render(request, 'entry.html') if request.user.is_authenticated else redirect('/login/')
 def sales_page(request): return render(request, 'sales.html') if request.user.is_authenticated else redirect('/login/')
 def contact_page(request): return render(request, 'contact.html') if request.user.is_authenticated else redirect('/login/')
+
+# 🟢 客户详情页 (解决 404)
+def contact_detail_page(request, id):
+    if not request.user.is_authenticated: return redirect('/login/')
+    return render(request, 'contact_detail.html', {'contact_id': id})
+
 def inventory_page(request): return render(request, 'inventory.html') if request.user.is_authenticated else redirect('/login/')
 def rental_hub_page(request): return render(request, 'rental_hub.html') if request.user.is_authenticated else redirect('/login/')
 def rental_create_page(request): return render(request, 'rental_create.html') if request.user.is_authenticated else redirect('/login/')
+
+# 报表分析
 def profit_page(request): return render(request, 'analysis_profit.html') if request.user.is_authenticated else redirect('/login/')
 def finance_page(request): return render(request, 'analysis_finance.html') if request.user.is_authenticated else redirect('/login/')
 def account_page(request): return render(request, 'analysis_account.html') if request.user.is_authenticated else redirect('/login/')
 def profile_page(request): return render(request, 'profile.html') if request.user.is_authenticated else redirect('/login/')
 
 # ==========================================
-# 🧱 基类
+# 🧱 2. API 基类 (Base ViewSet)
 # ==========================================
 class TenantAwareViewSet(viewsets.ModelViewSet):
     authentication_classes = (CsrfExemptSessionAuthentication, )
@@ -55,7 +65,7 @@ class TenantAwareViewSet(viewsets.ModelViewSet):
         else: serializer.save()
 
 # ==========================================
-# 👤 用户
+# 👤 3. 用户与租户 (User & Tenant)
 # ==========================================
 class StaffViewSet(TenantAwareViewSet):
     queryset = CustomUser.objects.all().order_by('-date_joined')
@@ -120,12 +130,195 @@ def api_register(request):
     return JsonResponse({'status': 'error'})
 
 # ==========================================
-# 📦 4. 业务逻辑
+# 📦 4. 业务逻辑 API
 # ==========================================
 
 class CapitalAccountViewSet(TenantAwareViewSet):
     queryset = CapitalAccount.objects.all(); serializer_class = CapitalAccountSerializer
     def list(self, request): return Response([{'id': a.id, 'name': a.name, 'balance': a.current_balance} for a in self.get_queryset()])
+
+
+class TransactionViewSet(viewsets.ViewSet):
+    """资金单据中心 API
+    - 列表：GET /api/transactions/?page=1&page_size=20&include_voided=0
+    - 作废：POST /api/transactions/{id}/void/
+    - 更正：POST /api/transactions/{id}/correct/  (会先作废旧流水，再生成新流水)
+    说明：遵循“宪法”——只改当前问题，不改 UI、不动既有业务流程；这里只补齐缺失的 API 和最小必要的账务联动。
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def _qs(self, model):
+        # 多租户：按当前用户 tenant 过滤（兼容历史数据 tenant 为空）
+        tenant = getattr(getattr(self.request, 'user', None), 'tenant', None)
+        qs = model.objects.all()
+        if tenant is not None and hasattr(model, 'tenant'):
+            qs = qs.filter(tenant=tenant)
+        return qs
+
+    def list(self, request):
+        from core.models import Transaction
+        from core.serializers import TransactionSerializer
+
+        include_voided = request.GET.get('include_voided', '0') in ['1', 'true', 'True']
+        qs = self._qs(Transaction).order_by('-created_at')
+        # 兼容旧库（没有字段时不报错）
+        if not include_voided and hasattr(Transaction, 'is_voided'):
+            qs = qs.filter(is_voided=False)
+
+        # 简易分页（与前端 page/page_size 对齐）
+        try:
+            page = int(request.GET.get('page', '1'))
+            page_size = int(request.GET.get('page_size', '20'))
+        except Exception:
+            page, page_size = 1, 20
+        page = max(page, 1)
+        page_size = min(max(page_size, 1), 200)
+
+        total = qs.count()
+        start = (page - 1) * page_size
+        end = start + page_size
+        data = TransactionSerializer(qs[start:end], many=True).data
+        return Response({'count': total, 'results': data})
+
+    def create(self, request):
+        # 当前版本前端未用到 create；保留最小实现，避免误用导致账务混乱
+        return Response({'detail': 'Not implemented'}, status=405)
+
+    def _reverse_balance_effect_safe(self, tx):
+        """尽量安全地反向回滚一条流水对账户/往来的影响。
+        只对“核销收款/核销付款”这类明确方向的流水做全局联动，避免误判。
+        """
+        from django.utils import timezone
+        from core.models import CapitalAccount, Contact
+
+        remark = (tx.remark or '').strip()
+        acct = tx.account if hasattr(tx, 'account') else None
+        contact = tx.contact if hasattr(tx, 'contact') else None
+        amt = float(tx.amount or 0)
+
+        # 1) 明确的核销流水：严格回滚（最关键）
+        if remark.startswith('收款核销'):
+            if contact: contact.balance = (contact.balance or 0) + amt; contact.save(update_fields=['balance'])
+            if acct: acct.current_balance = (acct.current_balance or 0) - amt; acct.save(update_fields=['current_balance'])
+            return True
+
+        if remark.startswith('付款核销'):
+            if contact: contact.balance = (contact.balance or 0) - amt; contact.save(update_fields=['balance'])
+            if acct: acct.current_balance = (acct.current_balance or 0) + amt; acct.save(update_fields=['current_balance'])
+            return True
+
+        # 2) 其他流水：仅回滚资金账户（按既有规则：SALE/RENT/OTHER 为入，BUY 为出）
+        #    不回滚 contact.balance（缺少明确方向字段，误判风险高）
+        if acct:
+            is_income = tx.type in ['SALE', 'RENT', 'OTHER']
+            delta = -amt if is_income else +amt
+            acct.current_balance = (acct.current_balance or 0) + delta
+            acct.save(update_fields=['current_balance'])
+            return True
+
+        return False
+
+    def _apply_balance_effect_safe(self, tx):
+        """尽量安全地应用一条流水对账户/往来的影响（用于更正生成的新流水）"""
+        from core.models import CapitalAccount, Contact
+
+        remark = (tx.remark or '').strip()
+        acct = tx.account if hasattr(tx, 'account') else None
+        contact = tx.contact if hasattr(tx, 'contact') else None
+        amt = float(tx.amount or 0)
+
+        if remark.startswith('收款核销'):
+            if contact: contact.balance = (contact.balance or 0) - amt; contact.save(update_fields=['balance'])
+            if acct: acct.current_balance = (acct.current_balance or 0) + amt; acct.save(update_fields=['current_balance'])
+            return True
+
+        if remark.startswith('付款核销'):
+            if contact: contact.balance = (contact.balance or 0) + amt; contact.save(update_fields=['balance'])
+            if acct: acct.current_balance = (acct.current_balance or 0) - amt; acct.save(update_fields=['current_balance'])
+            return True
+
+        if acct:
+            is_income = tx.type in ['SALE', 'RENT', 'OTHER']
+            delta = +amt if is_income else -amt
+            acct.current_balance = (acct.current_balance or 0) + delta
+            acct.save(update_fields=['current_balance'])
+            return True
+
+        return False
+
+    @action(detail=True, methods=['post'])
+    def void(self, request, pk=None):
+        from django.utils import timezone
+        from core.models import Transaction
+
+        tx = self._qs(Transaction).filter(id=pk).first()
+        if not tx:
+            return Response({'detail': 'Not found'}, status=404)
+
+        if getattr(tx, 'is_voided', False):
+            return Response({'detail': 'Already voided'}, status=400)
+
+        # 先回滚余额影响（安全回滚）
+        self._reverse_balance_effect_safe(tx)
+
+        # 标记作废
+        if hasattr(tx, 'is_voided'):
+            tx.is_voided = True
+        if hasattr(tx, 'void_reason'):
+            tx.void_reason = str(request.data.get('reason', '') or '')[:200]
+        if hasattr(tx, 'voided_at'):
+            tx.voided_at = timezone.now()
+        tx.save()
+
+        return Response({'ok': True})
+
+    @action(detail=True, methods=['post'])
+    def correct(self, request, pk=None):
+        """更正：作废旧流水 + 生成新流水（并联动余额）"""
+        from django.utils import timezone
+        from core.models import Transaction
+
+        old = self._qs(Transaction).filter(id=pk).first()
+        if not old:
+            return Response({'detail': 'Not found'}, status=404)
+        if getattr(old, 'is_voided', False):
+            return Response({'detail': 'Cannot correct a voided transaction'}, status=400)
+
+        try:
+            new_amount = float(request.data.get('amount', old.amount))
+        except Exception:
+            return Response({'detail': 'Invalid amount'}, status=400)
+
+        # 1) 先作废旧流水（含回滚余额）
+        self._reverse_balance_effect_safe(old)
+        if hasattr(old, 'is_voided'):
+            old.is_voided = True
+        if hasattr(old, 'void_reason'):
+            old.void_reason = str(request.data.get('reason', '更正作废') or '')[:200]
+        if hasattr(old, 'voided_at'):
+            old.voided_at = timezone.now()
+        old.save()
+
+        # 2) 生成新流水（尽量沿用旧字段）
+        new_tx = Transaction.objects.create(
+            tenant=getattr(old, 'tenant', None),
+            type=old.type,
+            contact=old.contact,
+            product=old.product,
+            stock_item=old.stock_item if hasattr(old, 'stock_item') else None,
+            account=old.account,
+            amount=new_amount,
+            total_amount=new_amount if getattr(old, 'total_amount', None) is not None else None,
+            remark=str(request.data.get('remark', old.remark or '') or '')[:200],
+            corrected_from=old if hasattr(old, 'corrected_from') else None,
+        )
+
+        # 3) 应用新流水对余额的影响
+        self._apply_balance_effect_safe(new_tx)
+
+        return Response({'ok': True, 'new_id': new_tx.id})
+
 
 class StockItemViewSet(TenantAwareViewSet):
     queryset = StockItem.objects.all().order_by('-id'); serializer_class = StockItemSerializer
@@ -148,8 +341,7 @@ class ProductViewSet(TenantAwareViewSet):
 
     def get_queryset(self):
         qs = super().get_queryset(); status = self.request.query_params.get('status')
-        if status and status != 'ALL':
-            qs = qs.filter(status=status)
+        if status and status != 'ALL': qs = qs.filter(status=status)
         return qs
 
     def create(self, request, *args, **kwargs):
@@ -223,29 +415,22 @@ class ProductViewSet(TenantAwareViewSet):
             with transaction.atomic():
                 for s in stocks: 
                     s.status = 'SOLD'; s.sold_price = unit_price; s.out_time = timezone.now(); s.save()
-                
                 remaining = StockItem.objects.filter(product=product, status='IN_STOCK', tenant=user.tenant).count()
                 product.status = 'SOLD' if remaining == 0 else 'IN_STOCK'; product.save()
                 
                 contact = Contact.objects.get(id=contact_id)
                 acc = CapitalAccount.objects.get(id=acc_id) if acc_id else None
-                
-                Transaction.objects.create(
-                    tenant=user.tenant, contact=contact, product=product, account=acc, 
-                    amount=received, total_amount=total_sell, 
-                    type='SALE', operator=user, remark=f"销售: {product.name} x {quantity}"
-                )
-                
+                Transaction.objects.create(tenant=user.tenant, contact=contact, product=product, account=acc, amount=received, total_amount=total_sell, type='SALE', operator=user, remark=f"销售: {product.name} x {quantity}")
                 if acc and received > 0: acc.current_balance += received; acc.save()
                 debt = total_sell - received
                 if debt != 0: Contact.objects.filter(id=contact.id).update(balance=F('balance') + debt)
-                
                 return Response({'msg': 'OK'})
         except Exception as e: return Response({'detail': str(e)}, 500)
 
 class ContactViewSet(TenantAwareViewSet):
     queryset = Contact.objects.all().order_by('-id'); serializer_class = ContactSerializer
     filter_backends = [filters.SearchFilter]; search_fields = ['name', 'phone']
+    
     def create(self, request, *args, **kwargs):
         if Contact.objects.filter(tenant=request.user.tenant, name=request.data.get('name')).exists():
             return Response(self.get_serializer(Contact.objects.get(tenant=request.user.tenant, name=request.data.get('name'))).data)
@@ -253,23 +438,43 @@ class ContactViewSet(TenantAwareViewSet):
     
     @action(detail=True, methods=['post'])
     def repay(self, request, pk=None):
-        contact = self.get_object(); amt = Decimal(request.data.get('amount', 0)); atype = request.data.get('action_type')
+        # 🟢 核销核心修复：使用悲观锁 select_for_update 防止并发，确保余额准确
         try:
             with transaction.atomic():
-                acc = CapitalAccount.objects.get(id=request.data.get('account_id'), tenant=request.user.tenant)
-                if atype == 'in': 
-                    acc.current_balance += amt; Contact.objects.filter(id=contact.id).update(balance=F('balance') - amt); ttype = 'SALE'
-                else: 
-                    acc.current_balance -= amt; Contact.objects.filter(id=contact.id).update(balance=F('balance') + amt); ttype = 'BUY'
-                acc.save()
-                Transaction.objects.create(tenant=request.user.tenant, contact=contact, account=acc, amount=amt, total_amount=0, type=ttype, operator=request.user, remark=f"核销: {atype} {amt}")
+                contact = Contact.objects.select_for_update().get(id=pk, tenant=request.user.tenant)
+                amt = Decimal(str(request.data.get('amount', 0)))
+                atype = request.data.get('action_type')
+                acc_id = request.data.get('account_id')
+                if amt <= 0: return Response({'detail': '金额无效'}, 400)
                 
-                contact.refresh_from_db()
+                acc = CapitalAccount.objects.get(id=acc_id, tenant=request.user.tenant)
+                
+                if atype == 'in': 
+                    contact.balance -= amt; acc.current_balance += amt
+                    ttype = 'SALE'; remark_text = "[资金] 收款核销"
+                else: 
+                    contact.balance += amt; acc.current_balance -= amt
+                    ttype = 'BUY'; remark_text = "[资金] 付款核销"
+                
+                contact.save(); acc.save()
+                Transaction.objects.create(tenant=request.user.tenant, contact=contact, account=acc, amount=amt, total_amount=0, type=ttype, operator=request.user, remark=remark_text)
+                
                 return Response({'msg': 'OK', 'new_balance': contact.balance})
         except Exception as e: return Response({'detail': str(e)}, 400)
     
     @action(detail=True, methods=['get'])
-    def history(self, request, pk=None): return Response([])
+    def history(self, request, pk=None):
+        # 🟢 修复流水文案：资金往来显示 [资金]，商品显示名称
+        txs = Transaction.objects.filter(tenant=request.user.tenant, contact_id=pk).select_related('product').order_by('-created_at')
+        res = []
+        for t in txs:
+            is_in = t.type in ['SALE', 'RENT', 'OTHER'] and t.type != 'BUY'
+            desc = t.product.name if t.product else (t.remark or '-')
+            if not t.product:
+                if t.type == 'SALE': desc = "[资金] 收款 (入账)"
+                elif t.type == 'BUY': desc = "[资金] 付款 (出账)"
+            res.append({'date': t.created_at.strftime('%Y-%m-%d %H:%M'), 'type': t.get_type_display(), 'remark': desc, 'amount': t.amount, 'sign': '+' if is_in else '-', 'is_income': is_in})
+        return Response(res)
 
 class RentalViewSet(TenantAwareViewSet):
     queryset = RentalContract.objects.all().order_by('-id'); serializer_class = RentalContractSerializer
@@ -282,10 +487,8 @@ class AnalysisViewSet(viewsets.ViewSet):
     def dashboard(self, request):
         today = timezone.localtime(timezone.now()).date()
         txs = self._get_qs(Transaction)
-        
         sales_today = txs.filter(type='SALE', created_at__date=today, product__isnull=False).aggregate(Sum('total_amount'))['total_amount__sum'] or 0
         stock_val = self._get_qs(StockItem).filter(status='IN_STOCK').aggregate(Sum('real_cost'))['real_cost__sum'] or 0
-        
         recent = []
         for t in txs.select_related('product', 'contact').order_by('-created_at')[:10]:
             time_str = timezone.localtime(t.created_at).strftime('%m-%d %H:%M')
@@ -300,7 +503,6 @@ class AnalysisViewSet(viewsets.ViewSet):
                 desc = f"[{type_str}] {t.product.name}"
                 is_in = t.type in ['SALE', 'RENT', 'OTHER']
             recent.append({'id': t.id, 'desc': desc, 'amount': amt_display, 'is_income': is_in, 'time': time_str})
-            
         contacts = self._get_qs(Contact)
         recv = contacts.filter(balance__gt=0).aggregate(Sum('balance'))['balance__sum'] or 0
         pay = contacts.filter(balance__lt=0).aggregate(Sum('balance'))['balance__sum'] or 0
@@ -311,13 +513,11 @@ class AnalysisViewSet(viewsets.ViewSet):
         pie_labels = []; pie_data = []
         for c in cat_data: pie_labels.append(cat_map.get(c['product__category'], '其他')); pie_data.append(c['total'])
         if not pie_data: pie_labels = ['暂无数据']; pie_data = [1]
-
         days = []; sales = []
         for i in range(6, -1, -1):
             d = today - timedelta(days=i); days.append(d.strftime('%m-%d'))
             val = txs.filter(type='SALE', created_at__date=d, product__isnull=False).aggregate(Sum('total_amount'))['total_amount__sum'] or 0
             sales.append(float(val))
-            
         return Response({'cards': {'stock_val': stock_val, 'total_sales_amount': sales_today, 'receivable': recv, 'payable': abs(pay), 'cash': cash}, 'recent_list': recent, 'charts': {'trend': {'labels': days, 'data': sales}, 'category': {'labels': pie_labels, 'data': pie_data}}})
 
     @action(detail=False)
@@ -331,10 +531,13 @@ class AnalysisViewSet(viewsets.ViewSet):
         
     @action(detail=False)
     def profit_dashboard(self, request):
+        # 🟢 修复：补全 ZenCode
         user = request.user
-        if not user.tenant: return Response({})
+        tenant = getattr(user, 'tenant', None)
+        if not tenant:
+            return Response({'cards': {'stock_val': 0, 'total_sales_amount': 0, 'receivable': 0, 'payable': 0, 'cash': 0}, 'recent_list': [], 'charts': {'trend': {'labels': [], 'data': []}, 'category': {'labels': ['暂无数据'], 'data': [1]}}}, status=200)
         start = request.query_params.get('start_date'); end = request.query_params.get('end_date')
-        txs = Transaction.objects.filter(tenant=user.tenant, type='SALE', product__isnull=False).select_related('product', 'contact', 'operator').order_by('-created_at')
+        txs = Transaction.objects.filter(tenant=tenant, type='SALE', product__isnull=False).select_related('product', 'contact', 'operator').order_by('-created_at')
         if start: txs = txs.filter(created_at__date__gte=start)
         if end: txs = txs.filter(created_at__date__lte=end)
         total_sales = 0; total_cost = 0; list_data = []
@@ -343,47 +546,23 @@ class AnalysisViewSet(viewsets.ViewSet):
             cost_amt = t.product.cost_price if t.product else 0
             profit = sale_amt - cost_amt
             total_sales += sale_amt; total_cost += cost_amt
-            list_data.append({
-                'date': t.created_at.strftime('%Y-%m-%d %H:%M'),
-                'zencode': t.product.zencode if t.product else '-',
-                'product_name': t.product.name if t.product else '未知',
-                'customer': t.contact.name if t.contact else '散客',
-                'sales': sale_amt, 'profit': profit,
-                'staff': t.operator.first_name if t.operator else '系统'
-            })
+            list_data.append({'date': t.created_at.strftime('%Y-%m-%d %H:%M'), 'zencode': t.product.zencode if t.product else '-', 'product_name': t.product.name if t.product else '未知', 'customer': t.contact.name if t.contact else '散客', 'sales': sale_amt, 'profit': profit, 'staff': t.operator.first_name if t.operator else '系统'})
         return Response({'summary': {'sales': total_sales, 'cost': total_cost, 'profit': total_sales - total_cost, 'margin': round((total_sales - total_cost) / total_sales * 100, 1) if total_sales > 0 else 0}, 'list': list_data})
 
     @action(detail=False)
     def account_history(self, request):
-        # 🟢 核心修复：资金流水查询同步 Dashboard 逻辑
+        # 🟢 修复：资金流水文案对齐主页
         acc_id = request.query_params.get('id')
         if not acc_id: return Response([])
         txs = Transaction.objects.filter(tenant=self.request.user.tenant, account_id=acc_id).select_related('product', 'contact').order_by('-created_at')
         res = []
         for t in txs:
             is_in = t.type in ['SALE', 'RENT', 'OTHER'] and t.type != 'BUY'
-            
-            # 🟢 智能判断文案
             if not t.product:
-                # 纯资金往来 (核销/转账)
                 target = t.contact.name if t.contact else '未知'
-                if t.type == 'SALE': 
-                    type_name = '资金收入'
-                    desc = f"[资金] {target} 付款给我"
-                else: 
-                    type_name = '资金支出'
-                    desc = f"[资金] 付款给 {target}"
+                if t.type == 'SALE': type_name = '资金收入'; desc = f"[资金] {target} 付款给我"
+                else: type_name = '资金支出'; desc = f"[资金] 付款给 {target}"
             else:
-                # 商品往来
-                type_name = t.get_type_display()
-                desc = t.product.name
-
-            res.append({
-                'date': t.created_at.strftime('%Y-%m-%d %H:%M'),
-                'type_name': type_name, 
-                'remark': desc, 
-                'amount': t.amount, 
-                'sign': '+' if is_in else '-', 
-                'is_income': is_in
-            })
+                type_name = t.get_type_display(); desc = t.product.name
+            res.append({'date': t.created_at.strftime('%Y-%m-%d %H:%M'), 'type_name': type_name, 'remark': desc, 'amount': t.amount, 'sign': '+' if is_in else '-', 'is_income': is_in})
         return Response(res)

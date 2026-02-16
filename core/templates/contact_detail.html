@@ -1,0 +1,189 @@
+{% extends 'base.html' %}
+{% block title %}档案详情{% endblock %}
+{% block content %}
+<div class="max-w-4xl mx-auto" id="app">
+    <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-6">
+        <div class="flex justify-between items-start">
+            <div>
+                <h1 class="text-2xl font-bold text-gray-800" id="cName">...</h1>
+                <div class="text-sm text-gray-500 mt-1">ID: <span id="cId">--</span></div>
+            </div>
+            <div class="text-right">
+                <div class="text-xs text-gray-400 font-bold uppercase mb-1">当前余额</div>
+                <div class="text-3xl font-black" id="cBal">0.00</div>
+                <div class="text-xs mt-1 font-bold px-2 py-1 rounded inline-block" id="cStatus">...</div>
+            </div>
+        </div>
+        
+        <div class="grid grid-cols-2 gap-4 mt-6 border-t border-gray-50 pt-4">
+            <div>
+                <label class="text-xs text-gray-400 font-bold">电话</label>
+                <div class="font-bold text-gray-700" id="cPhone">-</div>
+            </div>
+            <div>
+                <label class="text-xs text-gray-400 font-bold">地址/备注</label>
+                <div class="font-bold text-gray-700" id="cAddress">-</div>
+            </div>
+        </div>
+
+        <div class="flex gap-3 mt-6">
+            <button onclick="openRepay('in')" class="flex-1 bg-green-600 text-white py-3 rounded-xl font-bold hover:bg-green-700 shadow-sm transition transform active:scale-95">
+                💰 收款 (入账)
+            </button>
+            <button onclick="openRepay('out')" class="flex-1 bg-white text-red-600 border-2 border-red-100 py-3 rounded-xl font-bold hover:bg-red-50 transition transform active:scale-95">
+                💸 付款 (出账)
+            </button>
+        </div>
+    </div>
+
+    <div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+        <div class="p-4 border-b border-gray-50 font-bold text-gray-700 flex justify-between items-center">
+            <span>交易与资金流水</span>
+            <span class="text-xs text-blue-500 cursor-pointer" onclick="loadHistory()">🔄 刷新</span>
+        </div>
+        <div class="divide-y divide-gray-50" id="historyList">
+            <div class="p-8 text-center text-gray-400">加载中...</div>
+        </div>
+    </div>
+</div>
+
+<div id="repayModal" class="fixed inset-0 bg-black bg-opacity-60 hidden z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+    <div class="bg-white rounded-2xl shadow-2xl p-6 w-96">
+        <h3 class="font-bold text-xl mb-4 text-gray-800" id="repayTitle">核销</h3>
+        <div class="space-y-4">
+            <div>
+                <label class="block text-xs font-bold text-gray-500 mb-1">金额 (¥)</label>
+                <input type="number" id="repayAmt" class="w-full border-2 border-blue-100 rounded-xl h-12 px-4 font-bold text-xl focus:border-blue-500 outline-none" placeholder="0.00">
+            </div>
+            <div>
+                <label class="block text-xs font-bold text-gray-500 mb-1">资金账户</label>
+                <select id="repayAcc" class="w-full border rounded-xl h-10 px-3 bg-gray-50"></select>
+            </div>
+        </div>
+        <div class="flex justify-end gap-3 mt-6">
+            <button onclick="document.getElementById('repayModal').classList.add('hidden')" class="px-5 py-2 rounded-xl text-gray-600 hover:bg-gray-100 font-bold text-sm">取消</button>
+            <button onclick="confirmRepay()" class="px-5 py-2 bg-blue-600 text-white rounded-xl font-bold text-sm hover:bg-blue-700 shadow">确认</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    const ID = "{{ contact_id }}";
+    let currentAction = 'in';
+
+    async function init() {
+        try {
+            const res = await axios.get(`/api/contacts/${ID}/?t=`+Date.now());
+            const c = res.data;
+            
+            document.getElementById('cName').innerText = c.name;
+            document.getElementById('cId').innerText = `#${c.id}`;
+            document.getElementById('cPhone').innerText = c.phone || '-';
+            document.getElementById('cAddress').innerText = c.address || '-';
+            
+            renderBalance(c.balance);
+            loadHistory();
+            loadAccounts();
+        } catch(e) {
+            alert("加载档案失败");
+            window.location.href = '/contact/';
+        }
+    }
+
+    function renderBalance(balStr) {
+        const b = parseFloat(balStr);
+        const elBal = document.getElementById('cBal');
+        const elSt = document.getElementById('cStatus');
+        
+        // 绝对值显示
+        elBal.innerText = '¥ ' + Math.abs(b).toLocaleString(undefined, {minimumFractionDigits: 2});
+        
+        // 红绿逻辑：正数=红(欠我)，负数=绿(我欠)
+        if (b > 0) {
+            elBal.className = "text-3xl font-black text-red-600";
+            elSt.className = "text-xs mt-1 font-bold px-2 py-1 rounded inline-block bg-red-100 text-red-600";
+            elSt.innerText = "对方欠我 (应收)";
+        } else if (b < 0) {
+            elBal.className = "text-3xl font-black text-green-600";
+            elSt.className = "text-xs mt-1 font-bold px-2 py-1 rounded inline-block bg-green-100 text-green-600";
+            elSt.innerText = "我欠对方 (应付)";
+        } else {
+            elBal.className = "text-3xl font-black text-gray-400";
+            elSt.className = "text-xs mt-1 font-bold px-2 py-1 rounded inline-block bg-gray-100 text-gray-400";
+            elSt.innerText = "账目已平";
+        }
+    }
+
+    async function loadHistory() {
+        const div = document.getElementById('historyList');
+        try {
+            const res = await axios.get(`/api/contacts/${ID}/history/?t=`+Date.now());
+            const list = res.data;
+            if(list.length === 0) {
+                div.innerHTML = `<div class="p-8 text-center text-gray-400 text-sm">暂无交易记录</div>`;
+                return;
+            }
+            div.innerHTML = list.map(h => `
+                <div class="p-4 flex justify-between items-center hover:bg-gray-50 transition">
+                    <div>
+                        <div class="font-bold text-gray-800 text-sm">${h.remark}</div>
+                        <div class="text-xs text-gray-400 mt-1">${h.date} · ${h.type}</div>
+                    </div>
+                    <div class="text-right font-mono font-bold ${h.is_income ? 'text-green-600' : 'text-red-600'}">
+                        ${h.sign} ${parseFloat(h.amount).toLocaleString()}
+                    </div>
+                </div>
+            `).join('');
+        } catch(e) {
+            div.innerHTML = `<div class="p-4 text-center text-red-400">加载失败</div>`;
+        }
+    }
+
+    async function loadAccounts() {
+        const res = await axios.get('/api/analysis/accounting/');
+        const html = res.data.accounts.map(a => `<option value="${a.id}">${a.name} (¥${a.balance})</option>`).join('');
+        document.getElementById('repayAcc').innerHTML = html;
+    }
+
+    window.openRepay = (type) => {
+        currentAction = type;
+        document.getElementById('repayTitle').innerText = type === 'in' ? '收款 (资金入账)' : '付款 (资金出账)';
+        document.getElementById('repayAmt').value = '';
+        document.getElementById('repayModal').classList.remove('hidden');
+    }
+
+    window.confirmRepay = async () => {
+        const amt = document.getElementById('repayAmt').value;
+        const acc = document.getElementById('repayAcc').value;
+        if(!amt || amt <= 0) return alert("请输入有效金额");
+        
+        try {
+            const res = await axios.post(`/api/contacts/${ID}/repay/`, {
+                amount: amt,
+                account_id: acc,
+                action_type: currentAction
+            });
+            
+            // 🟢 成功后立即关闭弹窗
+            document.getElementById('repayModal').classList.add('hidden');
+            
+            // 🟢 核心修复：直接使用后端返回的 new_balance 更新界面
+            if (res.data && res.data.new_balance !== undefined) {
+                renderBalance(res.data.new_balance);
+            } else {
+                // 如果后端没返回，强制重载全页
+                init();
+            }
+            
+            // 刷新流水列表
+            loadHistory();
+            alert("核销成功，账目已更新");
+            
+        } catch(e) {
+            alert("操作失败: " + (e.response?.data?.detail || e.message));
+        }
+    }
+
+    init();
+</script>
+{% endblock %}

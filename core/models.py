@@ -141,6 +141,12 @@ class Transaction(TenantAwareModel):
     operator = models.ForeignKey(CustomUser, on_delete=models.SET_NULL, null=True, verbose_name="经手人")
     remark = models.CharField(max_length=200, blank=True, verbose_name="摘要")
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="时间")
+    # 🟠 单据中心：作废/更正
+    is_voided = models.BooleanField(default=False, verbose_name="已作废")
+    void_reason = models.CharField(max_length=200, blank=True, verbose_name="作废原因")
+    voided_at = models.DateTimeField(null=True, blank=True, verbose_name="作废时间")
+    corrected_from = models.ForeignKey('self', null=True, blank=True, on_delete=models.SET_NULL, related_name='corrections', verbose_name="更正来源")
+
     class Meta: verbose_name = "财务流水"; verbose_name_plural = verbose_name
 
 # 7. 序列号工厂 (补全)

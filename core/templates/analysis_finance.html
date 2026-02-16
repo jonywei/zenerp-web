@@ -1,105 +1,111 @@
 {% extends 'base.html' %}
-{% block title %}欠款往来{% endblock %}
+{% block title %}欠款与往来{% endblock %}
 {% block content %}
 <div class="max-w-6xl mx-auto">
-    <div class="flex bg-white p-1 rounded-lg mb-6 shadow-sm border border-gray-200 w-full md:w-96 mx-auto">
-        <button onclick="tab='in';render()" id="btnIn" class="flex-1 py-2 rounded-md font-bold text-sm transition">应收 (别人欠我)</button>
-        <button onclick="tab='out';render()" id="btnOut" class="flex-1 py-2 rounded-md font-bold text-sm transition">应付 (我欠别人)</button>
+    <div class="mb-6 border-l-4 border-red-500 pl-3">
+        <h1 class="text-2xl font-bold text-gray-800">欠款与往来</h1>
+        <p class="text-xs text-gray-400 mt-1">实时统计所有客户/供应商的资金往来</p>
     </div>
-    
-    <div id="list" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>
-</div>
 
-<div id="historyModal" class="fixed inset-0 bg-black bg-opacity-50 hidden z-50 flex items-center justify-center p-4">
-    <div class="bg-white rounded-xl w-full max-w-2xl max-h-[85vh] flex flex-col shadow-2xl">
-        <div class="px-6 py-4 border-b flex justify-between items-center bg-gray-50 rounded-t-xl">
-            <h3 class="font-bold text-lg text-gray-800" id="modalTitle">交易明细</h3>
-            <button onclick="document.getElementById('historyModal').classList.add('hidden')" class="text-gray-500 hover:text-gray-700 text-2xl">&times;</button>
+    <div class="grid grid-cols-2 gap-4 mb-6">
+        <div class="bg-red-50 p-5 rounded-2xl border border-red-100">
+            <div class="text-sm font-bold text-red-400 uppercase">总应收款 (别人欠我)</div>
+            <div class="text-3xl font-black text-red-600 mt-1" id="totalRecv">0.00</div>
         </div>
-        <div class="flex-1 overflow-y-auto p-0" id="historyList"></div>
+        <div class="bg-green-50 p-5 rounded-2xl border border-green-100">
+            <div class="text-sm font-bold text-green-500 uppercase">总应付款 (我欠别人)</div>
+            <div class="text-3xl font-black text-green-600 mt-1" id="totalPay">0.00</div>
+        </div>
+    </div>
+
+    <div class="bg-white shadow-sm rounded-2xl border border-gray-100 overflow-hidden">
+        <div class="p-4 border-b border-gray-50 flex justify-between items-center">
+            <h3 class="font-bold text-gray-700">往来明细</h3>
+            <button onclick="loadFinance()" class="text-blue-500 text-sm font-bold hover:underline">🔄 刷新数据</button>
+        </div>
+        <table class="w-full text-left">
+            <thead class="bg-gray-50 text-gray-500 text-xs uppercase font-bold">
+                <tr>
+                    <th class="px-6 py-4">对象 (客户/供应商)</th>
+                    <th class="px-6 py-4 text-right">往来金额</th>
+                    <th class="px-6 py-4 text-right">状态</th>
+                    <th class="px-6 py-4 text-center">操作</th>
+                </tr>
+            </thead>
+            <tbody id="financeList" class="text-sm divide-y divide-gray-100">
+                <tr><td colspan="4" class="px-6 py-8 text-center text-gray-400">正在计算...</td></tr>
+            </tbody>
+        </table>
     </div>
 </div>
 
 <script>
-    let tab = 'in', all = [], accs = [];
-    
-    async function load() {
-        const [c, a] = await Promise.all([
-            axios.get('/api/contacts/?page_size=1000&t='+Date.now()),
-            axios.get('/api/analysis/accounting/?t='+Date.now())
-        ]);
-        all = c.data.results || c.data;
-        accs = a.data.accounts;
-        render();
-    }
-
-    function render() {
-        const activeClass = 'bg-blue-50 text-blue-600 shadow-sm ring-1 ring-blue-200';
-        const normalClass = 'text-gray-500 hover:bg-gray-50';
-        document.getElementById('btnIn').className = `flex-1 py-2 rounded-md font-bold text-sm transition ${tab==='in'?activeClass:normalClass}`;
-        document.getElementById('btnOut').className = `flex-1 py-2 rounded-md font-bold text-sm transition ${tab==='out'?activeClass:normalClass}`;
-
-        const list = all.filter(c => tab==='in' ? parseFloat(c.balance)>0 : parseFloat(c.balance)<0);
-        
-        document.getElementById('list').innerHTML = list.length ? list.map(c => `
-            <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex justify-between items-center group hover:border-blue-300 transition cursor-pointer" onclick="showHistory(${c.id}, '${c.name}', event)">
-                <div>
-                    <h3 class="font-bold text-gray-800 text-lg group-hover:text-blue-600">${c.name}</h3>
-                    <p class="text-xs text-gray-400 mt-1">点击查看详情 ›</p>
-                </div>
-                <div class="text-right">
-                    <p class="font-black text-2xl ${tab==='in'?'text-green-600':'text-red-600'}">¥${Math.abs(c.balance).toLocaleString()}</p>
-                    <button onclick="repay(${c.id}, '${c.name}', event)" class="mt-2 text-xs bg-gray-100 hover:bg-blue-600 hover:text-white text-gray-600 px-4 py-1.5 rounded-full border transition font-bold">
-                        ${tab==='in'?'收款核销':'付款核销'}
-                    </button>
-                </div>
-            </div>`).join('') : '<div class="col-span-full text-center text-gray-400 py-10">无欠款记录</div>';
-    }
-
-    async function showHistory(id, name, e) {
-        if(e.target.tagName === 'BUTTON') return; // 防止点到按钮
-
-        document.getElementById('modalTitle').innerText = `${name} - 往来明细`;
-        document.getElementById('historyList').innerHTML = '<div class="p-10 text-center text-gray-400">加载中...</div>';
-        document.getElementById('historyModal').classList.remove('hidden');
-
+    async function loadFinance() {
         try {
-            // 🟢 确保调用的是正确的 history 接口
-            const res = await axios.get(`/api/contacts/${id}/history/?t=` + Date.now());
-            const list = res.data;
-            if(list.length === 0) {
-                document.getElementById('historyList').innerHTML = '<div class="p-10 text-center text-gray-400">暂无交易记录</div>';
-                return;
-            }
-            document.getElementById('historyList').innerHTML = list.map(t => `
-                <div class="px-6 py-4 border-b border-gray-50 hover:bg-gray-50 flex justify-between items-center">
-                    <div>
-                        <div class="font-bold text-gray-800 text-sm">${t.type} <span class="font-normal text-gray-500">- ${t.operator||'系统'}</span></div>
-                        <div class="text-xs text-gray-500 mt-1">${t.date} <span class="bg-gray-100 px-1 rounded ml-1">${t.product || t.remark}</span></div>
-                    </div>
-                    <div class="text-right font-mono font-bold text-gray-700">¥${parseFloat(t.amount).toLocaleString()}</div>
-                </div>
-            `).join('');
+            // 🟢 核心：强制拉取最新数据，不读缓存
+            const res = await axios.get('/api/contacts/?page_size=2000&t=' + Date.now());
+            const list = res.data.results || res.data;
+            
+            // 过滤掉余额为 0 的（没有往来的就不显示）
+            // 如果您希望显示所有，请注释掉 .filter
+            const activeList = list.filter(c => parseFloat(c.balance) !== 0);
+            
+            renderFinance(activeList);
+            calcTotals(activeList);
         } catch(e) {
-            document.getElementById('historyList').innerHTML = '<div class="p-10 text-center text-red-500">加载失败</div>';
+            document.getElementById('financeList').innerHTML = `<tr><td colspan="4" class="text-center py-4 text-red-500">加载失败</td></tr>`;
         }
     }
 
-    async function repay(id, name, e) {
-        e.stopPropagation();
-        if(!accs.length) return alert("请先创建资金账户");
-        const amount = prompt(`对 [${name}] 进行核销\n请输入金额:`);
-        if(!amount) return;
-        try {
-            await axios.post(`/api/contacts/${id}/repay/`, {
-                amount: amount,
-                account_id: accs[0].id,
-                action_type: tab
-            });
-            alert("核销成功");
-            load();
-        } catch(e) { alert("失败"); }
+    function calcTotals(list) {
+        let recv = 0;
+        let pay = 0;
+        list.forEach(c => {
+            const b = parseFloat(c.balance);
+            if (b > 0) recv += b; // 欠我
+            if (b < 0) pay += Math.abs(b); // 我欠
+        });
+        document.getElementById('totalRecv').innerText = '¥ ' + recv.toLocaleString(undefined, {minimumFractionDigits: 2});
+        document.getElementById('totalPay').innerText = '¥ ' + pay.toLocaleString(undefined, {minimumFractionDigits: 2});
     }
-    load();
+
+    function renderFinance(list) {
+        const tbody = document.getElementById('financeList');
+        if (list.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="4" class="px-6 py-10 text-center text-gray-400 bg-gray-50">🎉 暂无欠款往来，账目清爽！</td></tr>`;
+            return;
+        }
+
+        // 按余额绝对值排序，钱多的排前面
+        list.sort((a, b) => Math.abs(parseFloat(b.balance)) - Math.abs(parseFloat(a.balance)));
+
+        tbody.innerHTML = list.map(c => {
+            const b = parseFloat(c.balance);
+            const isDebt = b > 0; // 欠我
+            const colorClass = isDebt ? 'text-red-600' : 'text-green-600';
+            const badgeClass = isDebt ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700';
+            const statusText = isDebt ? '欠我款' : '我欠款';
+            
+            return `
+            <tr class="hover:bg-gray-50 transition cursor-pointer" onclick="window.location.href='/contact/detail/${c.id}/'">
+                <td class="px-6 py-4">
+                    <div class="font-bold text-gray-800 text-base">${c.name}</div>
+                    <div class="text-xs text-gray-400 mt-0.5">${c.phone || ''}</div>
+                </td>
+                <td class="px-6 py-4 text-right font-mono font-bold text-lg ${colorClass}">
+                    ¥ ${Math.abs(b).toLocaleString()}
+                </td>
+                <td class="px-6 py-4 text-right">
+                    <span class="${badgeClass} px-3 py-1 rounded-full text-xs font-bold">${statusText}</span>
+                </td>
+                <td class="px-6 py-4 text-center">
+                    <span class="text-blue-500 hover:text-blue-700 font-bold text-xs">去核销 &rarr;</span>
+                </td>
+            </tr>
+            `;
+        }).join('');
+    }
+
+    loadFinance();
 </script>
 {% endblock %}

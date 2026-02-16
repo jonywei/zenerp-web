@@ -1,108 +1,145 @@
 {% extends 'base.html' %}
-{% block title %}客户/供应商档案{% endblock %}
+{% block title %}客户档案{% endblock %}
 {% block content %}
-<div class="flex justify-between items-center mb-6">
-    <h1 class="text-2xl font-bold text-gray-800 border-l-4 border-blue-500 pl-3">客户与往来</h1>
-    <div class="flex gap-2">
-        <input type="text" id="so" class="border rounded px-4 py-2 w-64" placeholder="🔍 搜姓名/电话..." oninput="filter()">
-        <button onclick="showAddModal()" class="bg-blue-600 text-white px-4 py-2 rounded font-bold hover:bg-blue-700 shadow">+ 新建</button>
+<div class="max-w-6xl mx-auto">
+    <div class="flex flex-col md:flex-row justify-between items-center mb-6 gap-4">
+        <h1 class="text-2xl font-bold text-gray-800 border-l-4 border-purple-600 pl-3">客户与供应商档案</h1>
+        <div class="flex gap-2 w-full md:w-auto">
+            <input type="text" id="searchInput" placeholder="搜索姓名/电话/地址..." class="border rounded-xl px-4 py-2 text-sm w-full md:w-64 shadow-sm" oninput="filterList()">
+            <button onclick="showAddModal()" class="bg-purple-600 text-white px-4 py-2 rounded-xl text-sm font-bold shadow hover:bg-purple-700 transition flex items-center gap-1">
+                <span>+</span> 新建档案
+            </button>
+        </div>
+    </div>
+
+    <div class="bg-white shadow-sm rounded-2xl overflow-hidden border border-gray-100">
+        <div class="overflow-x-auto">
+            <table class="w-full text-left border-collapse">
+                <thead class="bg-gray-50 text-gray-500 text-xs uppercase font-bold">
+                    <tr>
+                        <th class="px-6 py-4">ID</th>
+                        <th class="px-6 py-4">姓名/称呼</th>
+                        <th class="px-6 py-4">电话</th>
+                        <th class="px-6 py-4">当前余额 (元)</th>
+                        <th class="px-6 py-4 text-center">操作</th>
+                    </tr>
+                </thead>
+                <tbody id="contactList" class="text-sm divide-y divide-gray-100">
+                    <tr><td colspan="5" class="px-6 py-8 text-center text-gray-400">正在同步最新档案...</td></tr>
+                </tbody>
+            </table>
+        </div>
     </div>
 </div>
 
-<div id="list" class="grid grid-cols-1 md:grid-cols-3 gap-4"></div>
-
-<div id="detailModal" class="fixed inset-0 bg-black bg-opacity-60 hidden z-50 flex items-center justify-center p-4">
-    <div class="bg-white rounded-xl w-full max-w-3xl flex flex-col shadow-2xl overflow-hidden max-h-[90vh]">
-        <div class="px-6 py-4 border-b flex justify-between items-center bg-gray-50">
-            <div><h3 class="font-bold text-xl" id="dName">--</h3><p class="text-xs text-gray-500" id="dPhone">--</p></div>
-            <button onclick="closeDetail()" class="text-3xl text-gray-400 hover:text-gray-600">&times;</button>
-        </div>
-        <div class="flex-1 overflow-y-auto p-6">
-            <div class="flex gap-4 mb-6">
-                <div class="flex-1 bg-gray-50 p-4 rounded border text-center relative overflow-hidden">
-                    <div id="dBarColor" class="absolute left-0 top-0 w-1 h-full bg-gray-300"></div>
-                    <p class="text-xs text-gray-500 font-bold mb-1">当前余额</p>
-                    <p class="text-3xl font-black" id="dBalance">--</p>
-                    <p class="text-sm font-bold mt-1" id="dStatus">--</p>
-                </div>
-                <div class="flex flex-col gap-2 justify-center">
-                    <button onclick="doRepay('in')" class="px-4 py-2 bg-green-600 text-white rounded font-bold hover:bg-green-700">收款核销</button>
-                    <button onclick="doRepay('out')" class="px-4 py-2 border-2 border-red-100 text-red-500 rounded font-bold hover:bg-red-50">付款核销</button>
-                </div>
+<div id="contactModal" class="fixed inset-0 bg-black bg-opacity-60 hidden z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+    <div class="bg-white rounded-2xl shadow-2xl p-6 w-96 transform transition-all">
+        <h3 class="font-bold text-xl mb-4 text-gray-800">新建档案</h3>
+        <div class="space-y-4">
+            <div>
+                <label class="block text-xs font-bold text-gray-500 mb-1">姓名 *</label>
+                <input id="formName" class="w-full border rounded-xl h-10 px-3 bg-gray-50 focus:bg-white transition" placeholder="客户或供应商姓名">
             </div>
-            <h4 class="font-bold text-gray-700 mb-2 border-l-4 border-purple-500 pl-2">交易流水</h4>
-            <div class="bg-white border rounded overflow-hidden"><table class="w-full text-sm"><thead class="bg-gray-50"><tr><th class="px-4 py-2 text-left">时间</th><th class="px-4 py-2 text-left">类型</th><th class="px-4 py-2 text-left">内容</th><th class="px-4 py-2 text-right">金额</th></tr></thead><tbody id="dHistory" class="divide-y"></tbody></table></div>
+            <div>
+                <label class="block text-xs font-bold text-gray-500 mb-1">电话</label>
+                <input id="formPhone" class="w-full border rounded-xl h-10 px-3 bg-gray-50 focus:bg-white transition" placeholder="手机号">
+            </div>
+            <div>
+                <label class="block text-xs font-bold text-gray-500 mb-1">地址/备注</label>
+                <input id="formAddress" class="w-full border rounded-xl h-10 px-3 bg-gray-50 focus:bg-white transition" placeholder="非必填">
+            </div>
         </div>
-    </div>
-</div>
-
-<div id="addModal" class="fixed inset-0 bg-black bg-opacity-60 hidden z-50 flex items-center justify-center">
-    <div class="bg-white p-6 rounded-lg w-80 shadow-lg">
-        <h3 class="font-bold mb-4">新建档案</h3>
-        <input id="cName" class="w-full border rounded h-10 px-3 mb-3" placeholder="姓名 (必填)">
-        <input id="cPhone" class="w-full border rounded h-10 px-3 mb-3" placeholder="电话">
-        <input id="cAddr" class="w-full border rounded h-10 px-3 mb-4" placeholder="地址">
-        <div class="flex justify-end gap-2"><button onclick="document.getElementById('addModal').classList.add('hidden')" class="px-4 py-2 bg-gray-100 rounded">取消</button><button onclick="add()" class="px-4 py-2 bg-blue-600 text-white rounded">保存</button></div>
+        <div class="flex justify-end gap-3 mt-6">
+            <button onclick="closeModal()" class="px-5 py-2 bg-gray-100 rounded-xl text-sm font-bold text-gray-600 hover:bg-gray-200">取消</button>
+            <button onclick="saveContact()" class="px-5 py-2 bg-purple-600 text-white rounded-xl text-sm font-bold shadow hover:bg-purple-700">保存</button>
+        </div>
     </div>
 </div>
 
 <script>
-    let all=[], accs=[];
-    async function load() {
+    let allContacts = [];
+
+    // 🟢 核心修复：进入页面强制拉取最新数据
+    async function initData() {
         try {
-            const [c, a] = await Promise.all([axios.get('/api/contacts/?page_size=1000&t='+Date.now()), axios.get('/api/analysis/accounting/?t='+Date.now())]);
-            all = c.data.results || c.data; accs = a.data.accounts; render(all);
-        } catch(e){ alert('加载失败'); }
-    }
-    function render(list) {
-        document.getElementById('list').innerHTML = list.map(c => {
-            const b = parseFloat(c.balance);
-            let badge = b>0 ? `<span class="bg-red-100 text-red-700 px-2 py-1 rounded text-xs font-bold">欠我 ¥${b}</span>` : (b<0 ? `<span class="bg-green-100 text-green-700 px-2 py-1 rounded text-xs font-bold">我欠 ¥${Math.abs(b)}</span>` : '');
-            return `<div class="bg-white p-5 rounded-xl shadow-sm border border-gray-100 hover:shadow-md cursor-pointer group" onclick="openDetail(${c.id})"><div class="flex justify-between items-start"><div class="flex items-center gap-3"><div class="w-10 h-10 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center font-bold">${c.name.charAt(0)}</div><div><h3 class="font-bold text-gray-800">${c.name}</h3><p class="text-xs text-gray-400">${c.phone||'--'}</p></div></div>${badge}</div><div class="mt-3 pt-3 border-t border-gray-50 flex justify-between text-xs text-gray-400"><span>${c.address||'无地址'}</span><span class="text-blue-500 font-bold opacity-0 group-hover:opacity-100">详情 ›</span></div></div>`;
-        }).join('');
-    }
-    async function openDetail(id) {
-        const c = all.find(i=>i.id===id); if(!c) return;
-        window.currentId = id;
-        document.getElementById('dName').innerText = c.name; document.getElementById('dPhone').innerText = c.phone||'--';
-        updateBalanceUI(parseFloat(c.balance));
-        document.getElementById('detailModal').classList.remove('hidden');
-        try {
-            const res = await axios.get(`/api/contacts/${id}/history/?t=`+Date.now());
-            document.getElementById('dHistory').innerHTML = res.data.length ? res.data.map(t=>`<tr class="hover:bg-gray-50"><td class="px-4 py-2 text-gray-400 text-xs">${t.date}</td><td class="px-4 py-2"><span class="bg-gray-100 px-2 py-1 rounded text-xs font-bold">${t.type_name}</span></td><td class="px-4 py-2 text-gray-700">${t.target||t.remark}</td><td class="px-4 py-2 text-right font-bold ${t.sign=='+'?'text-green-600':'text-red-600'}">${t.sign} ${parseFloat(t.amount).toLocaleString()}</td></tr>`).join('') : '<tr><td colspan="4" class="p-4 text-center text-gray-400">无记录</td></tr>';
-        } catch(e){}
-    }
-    
-    function updateBalanceUI(b) {
-        const elB=document.getElementById('dBalance'), elS=document.getElementById('dStatus'), elBar=document.getElementById('dBarColor');
-        elB.innerText = '¥ '+Math.abs(b).toLocaleString();
-        if(b>0) { elB.className="text-3xl font-black text-red-600"; elS.innerText="对方欠款 (应收)"; elS.className="text-sm font-bold mt-1 text-red-500"; elBar.className="absolute left-0 top-0 w-1 h-full bg-red-500"; }
-        else if(b<0) { elB.className="text-3xl font-black text-green-600"; elS.innerText="我方欠款 (应付)"; elS.className="text-sm font-bold mt-1 text-green-500"; elBar.className="absolute left-0 top-0 w-1 h-full bg-green-500"; }
-        else { elB.className="text-3xl font-black text-gray-800"; elS.innerText="账目平衡"; elS.className="text-sm font-bold mt-1 text-gray-400"; elBar.className="absolute left-0 top-0 w-1 h-full bg-gray-300"; }
+            // 加时间戳，防止浏览器缓存旧名单
+            const res = await axios.get('/api/contacts/?page_size=2000&t=' + Date.now());
+            allContacts = res.data.results || res.data;
+            renderTable(allContacts);
+        } catch (e) {
+            document.getElementById('contactList').innerHTML = `<tr><td colspan="5" class="px-6 py-8 text-center text-red-500">数据同步失败，请刷新页面</td></tr>`;
+        }
     }
 
-    async function doRepay(type) {
-        if(!accs.length) return alert('无资金账户');
-        const amt = prompt('请输入金额'); if(!amt) return;
-        try { 
-            const res = await axios.post(`/api/contacts/${window.currentId}/repay/`, {amount:amt, account_id:accs[0].id, action_type:type}); 
-            alert('成功'); 
-            // 🟢 核心：直接用后端返回的新余额更新UI，不用等刷新！
-            if(res.data.new_balance !== undefined) {
-                updateBalanceUI(parseFloat(res.data.new_balance));
-                // 同时更新列表里的缓存数据
-                const c = all.find(i=>i.id===window.currentId);
-                if(c) c.balance = res.data.new_balance;
-                render(all);
-            } else {
-                closeDetail(); load(); 
-            }
-        } catch(e){ alert('失败'); }
+    function renderTable(list) {
+        const tbody = document.getElementById('contactList');
+        if (list.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="5" class="px-6 py-8 text-center text-gray-400">暂无档案记录</td></tr>`;
+            return;
+        }
+        
+        tbody.innerHTML = list.map(c => {
+            // 余额红绿逻辑：正数(欠我)红，负数(我欠)绿
+            const bal = parseFloat(c.balance);
+            let balHtml = `<span class="font-bold text-gray-400">0.00</span>`;
+            if (bal > 0) balHtml = `<span class="font-bold text-red-500 bg-red-50 px-2 py-1 rounded">欠我 ${bal.toLocaleString()}</span>`;
+            if (bal < 0) balHtml = `<span class="font-bold text-green-600 bg-green-50 px-2 py-1 rounded">我欠 ${Math.abs(bal).toLocaleString()}</span>`;
+
+            return `
+            <tr class="hover:bg-gray-50 transition">
+                <td class="px-6 py-4 font-mono text-gray-400">#${c.id}</td>
+                <td class="px-6 py-4 font-bold text-gray-800">
+                    ${c.name}
+                    ${c.address ? `<div class="text-xs text-gray-400 font-normal mt-0.5">${c.address}</div>` : ''}
+                </td>
+                <td class="px-6 py-4 text-gray-600">${c.phone || '-'}</td>
+                <td class="px-6 py-4">${balHtml}</td>
+                <td class="px-6 py-4 text-center">
+                    <button onclick="window.location.href='/contact/detail/${c.id}/'" class="text-blue-600 hover:underline text-xs font-bold bg-blue-50 px-3 py-1.5 rounded-lg">查看详情</button>
+                </td>
+            </tr>
+            `;
+        }).join('');
     }
-    function closeDetail(){ document.getElementById('detailModal').classList.add('hidden'); }
-    function filter(){ const k=document.getElementById('so').value.toLowerCase(); render(all.filter(i=>i.name.toLowerCase().includes(k)||i.phone.includes(k))); }
-    window.showAddModal=()=>document.getElementById('addModal').classList.remove('hidden');
-    async function add(){ try{ await axios.post('/api/contacts/', {name:document.getElementById('cName').value, phone:document.getElementById('cPhone').value, address:document.getElementById('cAddr').value}); alert('成功'); document.getElementById('addModal').classList.add('hidden'); load(); }catch(e){alert('失败');} }
-    load();
+
+    function filterList() {
+        const k = document.getElementById('searchInput').value.toLowerCase();
+        const filtered = allContacts.filter(c => 
+            c.name.toLowerCase().includes(k) || 
+            (c.phone && c.phone.includes(k)) ||
+            (c.address && c.address.toLowerCase().includes(k))
+        );
+        renderTable(filtered);
+    }
+
+    // 弹窗逻辑
+    window.showAddModal = () => document.getElementById('contactModal').classList.remove('hidden');
+    window.closeModal = () => document.getElementById('contactModal').classList.add('hidden');
+
+    async function saveContact() {
+        const name = document.getElementById('formName').value;
+        const phone = document.getElementById('formPhone').value;
+        const address = document.getElementById('formAddress').value;
+
+        if(!name) return alert("姓名必填");
+
+        try {
+            // 保存并刷新
+            const res = await axios.post('/api/contacts/', { name, phone, address });
+            // 将新数据插入头部
+            allContacts.unshift(res.data);
+            renderTable(allContacts);
+            closeModal();
+            // 清空
+            document.getElementById('formName').value = '';
+            document.getElementById('formPhone').value = '';
+            document.getElementById('formAddress').value = '';
+        } catch(e) {
+            alert("保存失败: " + (e.response?.data?.detail || e.message));
+        }
+    }
+
+    // 启动
+    initData();
 </script>
 {% endblock %}

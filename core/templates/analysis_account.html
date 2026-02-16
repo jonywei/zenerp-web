@@ -1,6 +1,7 @@
 {% extends 'base.html' %}
 {% block title %}资金账户{% endblock %}
 {% block content %}
+
 <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
     <div class="bg-indigo-600 text-white p-6 rounded-2xl shadow-lg">
         <p class="text-indigo-200 text-xs font-bold mb-1">企业净资产</p>
@@ -11,22 +12,286 @@
         <h1 class="text-3xl font-bold text-gray-800" id="cash">0.00</h1>
     </div>
 </div>
-<div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-    <h3 class="font-bold text-gray-800 mb-4">账户列表</h3>
+
+<div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6 mb-6">
+    <div class="flex items-center justify-between mb-4">
+        <h3 class="font-bold text-gray-800">账户列表</h3>
+        <button onclick="reloadAll()" class="text-blue-500 text-sm font-bold hover:underline">🔄 刷新</button>
+    </div>
     <div id="list" class="space-y-3"></div>
 </div>
+
+<!-- 单据中心 -->
+<div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+    <div class="p-4 border-b border-gray-50 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+        <div>
+            <h3 class="font-bold text-gray-800">单据中心</h3>
+            <p class="text-xs text-gray-400 mt-1">所有金额相关操作的流水汇总：入库/出库/收款/付款/出租/收租（支持作废/更正）</p>
+        </div>
+        <div class="flex flex-wrap gap-2 items-center">
+            <select id="typeFilter" class="border rounded-lg px-3 py-2 text-sm bg-gray-50 outline-none focus:ring-2 focus:ring-blue-500">
+                <option value="">全部类型</option>
+                <option value="SALE">销售</option>
+                <option value="BUY">采购</option>
+                <option value="RENT">租赁</option>
+                <option value="OTHER">其他</option>
+                <option value="FUND">资金</option>
+            </select>
+
+            <label class="flex items-center gap-2 text-sm text-gray-600 px-2">
+                <input id="includeVoided" type="checkbox" class="rounded">
+                <span>包含作废</span>
+            </label>
+
+            <button onclick="loadTx(1)" class="bg-blue-600 text-white px-4 py-2 rounded-lg font-bold text-sm hover:bg-blue-700 transition shadow-sm">
+                查询
+            </button>
+        </div>
+    </div>
+
+    <div class="overflow-x-auto">
+        <table class="w-full text-left text-sm whitespace-nowrap">
+            <thead class="bg-gray-50 text-gray-500 text-xs uppercase font-bold">
+                <tr>
+                    <th class="px-6 py-4">时间</th>
+                    <th class="px-6 py-4">类型</th>
+                    <th class="px-6 py-4">对象</th>
+                    <th class="px-6 py-4">说明</th>
+                    <th class="px-6 py-4 text-right">金额</th>
+                    <th class="px-6 py-4 text-center">状态</th>
+                    <th class="px-6 py-4 text-center">操作</th>
+                </tr>
+            </thead>
+            <tbody id="txBody" class="divide-y divide-gray-100">
+                <tr><td colspan="7" class="px-6 py-10 text-center text-gray-400">数据加载中...</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="p-4 border-t border-gray-50 flex items-center justify-between">
+        <div class="text-xs text-gray-400" id="txMeta">-</div>
+        <div class="flex gap-2">
+            <button id="btnPrev" onclick="txPrev()" class="px-3 py-1.5 rounded-lg border text-sm font-bold text-gray-600 hover:bg-gray-50">上一页</button>
+            <button id="btnNext" onclick="txNext()" class="px-3 py-1.5 rounded-lg border text-sm font-bold text-gray-600 hover:bg-gray-50">下一页</button>
+        </div>
+    </div>
+</div>
+
+<!-- 作废弹窗 -->
+<div id="voidModal" class="fixed inset-0 bg-black/40 hidden items-center justify-center z-50">
+    <div class="bg-white w-full max-w-lg rounded-2xl shadow-xl p-6 mx-4">
+        <div class="flex items-center justify-between mb-4">
+            <h3 class="font-bold text-gray-800">作废单据</h3>
+            <button onclick="closeVoid()" class="text-gray-400 hover:text-gray-600 font-bold">✕</button>
+        </div>
+        <p class="text-sm text-gray-600 mb-3">将该单据标记为<strong>作废</strong>，统计与余额将不再计入（不物理删除）。</p>
+        <textarea id="voidReason" class="w-full border rounded-xl p-3 text-sm outline-none focus:ring-2 focus:ring-red-500" rows="3" placeholder="请输入作废原因（必填）"></textarea>
+        <div class="flex justify-end gap-2 mt-4">
+            <button onclick="closeVoid()" class="px-4 py-2 rounded-lg border font-bold text-sm text-gray-600 hover:bg-gray-50">取消</button>
+            <button onclick="submitVoid()" class="px-4 py-2 rounded-lg bg-red-600 text-white font-bold text-sm hover:bg-red-700">确认作废</button>
+        </div>
+    </div>
+</div>
+
+<!-- 更正弹窗 -->
+<div id="correctModal" class="fixed inset-0 bg-black/40 hidden items-center justify-center z-50">
+    <div class="bg-white w-full max-w-lg rounded-2xl shadow-xl p-6 mx-4">
+        <div class="flex items-center justify-between mb-4">
+            <h3 class="font-bold text-gray-800">更正金额（红冲）</h3>
+            <button onclick="closeCorrect()" class="text-gray-400 hover:text-gray-600 font-bold">✕</button>
+        </div>
+        <p class="text-sm text-gray-600 mb-3">
+            更正规则：<strong>原流水作废</strong> + <strong>生成一条新的正确流水</strong>，并全局联动余额。
+        </p>
+        <div class="grid grid-cols-1 gap-3">
+            <div>
+                <label class="block text-xs font-bold text-gray-500 mb-1">正确金额（必填）</label>
+                <input id="correctAmount" type="number" step="0.01" class="w-full border rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" placeholder="例如：200 或 -200">
+                <p class="text-xs text-gray-400 mt-1">正数=收入，负数=支出（以你系统流水逻辑为准）</p>
+            </div>
+            <div>
+                <label class="block text-xs font-bold text-gray-500 mb-1">更正说明（必填）</label>
+                <textarea id="correctNote" class="w-full border rounded-xl p-3 text-sm outline-none focus:ring-2 focus:ring-blue-500" rows="3" placeholder="例如：对账发现少收100，原录300，现更正为200"></textarea>
+            </div>
+        </div>
+        <div class="flex justify-end gap-2 mt-4">
+            <button onclick="closeCorrect()" class="px-4 py-2 rounded-lg border font-bold text-sm text-gray-600 hover:bg-gray-50">取消</button>
+            <button onclick="submitCorrect()" class="px-4 py-2 rounded-lg bg-blue-600 text-white font-bold text-sm hover:bg-blue-700">确认更正</button>
+        </div>
+    </div>
+</div>
+
 <script>
-    async function load() {
-        const res = await axios.get('/api/analysis/accounting/?t='+Date.now());
+    // ===== 账户概览 =====
+    async function loadAccounting() {
+        const res = await axios.get('/api/analysis/accounting/?t=' + Date.now());
         const d = res.data;
-        document.getElementById('net').innerText = '¥' + d.net_worth.toLocaleString();
-        document.getElementById('cash').innerText = d.cash.toLocaleString();
-        document.getElementById('list').innerHTML = d.accounts.map(a=>`
+        document.getElementById('net').innerText = '¥' + Number(d.net_worth || 0).toLocaleString();
+        document.getElementById('cash').innerText = Number(d.cash || 0).toLocaleString();
+        document.getElementById('list').innerHTML = (d.accounts || []).map(a=>`
             <div class="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
                 <span class="font-bold text-gray-700">${a.name}</span>
-                <span class="font-mono font-bold">¥${a.balance.toLocaleString()}</span>
+                <span class="font-mono font-bold">¥${Number(a.balance || 0).toLocaleString()}</span>
             </div>`).join('');
     }
-    load();
+
+    // ===== 单据中心 =====
+    let txPage = 1;
+    let txHasNext = false;
+    let txHasPrev = false;
+    let currentTxId = null;
+
+    function typeCN(t) {
+        return ({'SALE':'销售','BUY':'采购','RENT':'租赁','OTHER':'其他','FUND':'资金'}[t] || t || '-');
+    }
+
+    function moneyFmt(n) {
+        const num = Number(n || 0);
+        return num.toLocaleString('zh-CN', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+    }
+
+    async function loadTx(page=1) {
+        txPage = page;
+        const type = document.getElementById('typeFilter').value;
+        const includeVoided = document.getElementById('includeVoided').checked ? '1' : '0';
+        let url = `/api/transactions/?page=${txPage}&page_size=20&include_voided=${includeVoided}&t=${Date.now()}`;
+        if (type) url += `&type=${encodeURIComponent(type)}`;
+
+        const tbody = document.getElementById('txBody');
+        tbody.innerHTML = `<tr><td colspan="7" class="px-6 py-10 text-center text-gray-400">数据加载中...</td></tr>`;
+
+        try {
+            const res = await axios.get(url);
+            const data = res.data;
+
+            // 兼容 DRF 分页 or 非分页
+            const list = data.results || data || [];
+            const count = data.count ?? list.length;
+
+            // prev/next
+            txHasPrev = !!data.previous;
+            txHasNext = !!data.next;
+
+            document.getElementById('btnPrev').disabled = !txHasPrev;
+            document.getElementById('btnNext').disabled = !txHasNext;
+            document.getElementById('btnPrev').className = txHasPrev ? "px-3 py-1.5 rounded-lg border text-sm font-bold text-gray-600 hover:bg-gray-50" : "px-3 py-1.5 rounded-lg border text-sm font-bold text-gray-300 bg-gray-50 cursor-not-allowed";
+            document.getElementById('btnNext').className = txHasNext ? "px-3 py-1.5 rounded-lg border text-sm font-bold text-gray-600 hover:bg-gray-50" : "px-3 py-1.5 rounded-lg border text-sm font-bold text-gray-300 bg-gray-50 cursor-not-allowed";
+
+            const startIdx = (txPage - 1) * 20 + 1;
+            const endIdx = Math.min(txPage * 20, count);
+            document.getElementById('txMeta').innerText = `第 ${txPage} 页 · 显示 ${count===0?0:startIdx}-${endIdx} / 共 ${count} 条`;
+
+            if (!list.length) {
+                tbody.innerHTML = `<tr><td colspan="7" class="px-6 py-10 text-center text-gray-400">暂无单据</td></tr>`;
+                return;
+            }
+
+            tbody.innerHTML = list.map(tx => {
+                const amt = Number(tx.amount || 0);
+                const isIn = amt >= 0;
+                const color = isIn ? 'text-green-600' : 'text-red-600';
+                const status = tx.is_voided ? `<span class="bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full text-xs font-bold">已作废</span>` :
+                                             `<span class="bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full text-xs font-bold">有效</span>`;
+                const obj = tx.contact_name || (tx.contact && tx.contact.name) || '-';
+                const note = tx.description || tx.desc || tx.remark || '-';
+                const time = tx.created_at ? tx.created_at.replace('T',' ').slice(0,19) : (tx.time || '-');
+
+                const btns = tx.is_voided ? '-' : `
+                    <button onclick="openCorrect(${tx.id})" class="text-blue-600 font-bold text-xs hover:underline">更正</button>
+                    <span class="text-gray-200 px-1">|</span>
+                    <button onclick="openVoid(${tx.id})" class="text-red-600 font-bold text-xs hover:underline">作废</button>
+                `;
+
+                return `
+                <tr class="hover:bg-gray-50 transition">
+                    <td class="px-6 py-4 text-gray-600">${time}</td>
+                    <td class="px-6 py-4 font-bold text-gray-700">${typeCN(tx.type)}</td>
+                    <td class="px-6 py-4 text-gray-700">${obj}</td>
+                    <td class="px-6 py-4 text-gray-600 max-w-[420px] overflow-hidden text-ellipsis">${note}</td>
+                    <td class="px-6 py-4 text-right font-mono font-bold ${color}">
+                        ${isIn?'+':''}¥ ${moneyFmt(Math.abs(amt))}
+                    </td>
+                    <td class="px-6 py-4 text-center">${status}</td>
+                    <td class="px-6 py-4 text-center">${btns}</td>
+                </tr>`;
+            }).join('');
+
+        } catch (e) {
+            console.error(e);
+            tbody.innerHTML = `<tr><td colspan="7" class="px-6 py-10 text-center text-red-500">加载失败</td></tr>`;
+        }
+    }
+
+    function txPrev(){ if(txHasPrev) loadTx(txPage-1); }
+    function txNext(){ if(txHasNext) loadTx(txPage+1); }
+
+    // ===== 作废 =====
+    function openVoid(id){
+        currentTxId = id;
+        document.getElementById('voidReason').value = '';
+        const m = document.getElementById('voidModal');
+        m.classList.remove('hidden');
+        m.classList.add('flex');
+    }
+    function closeVoid(){
+        currentTxId = null;
+        const m = document.getElementById('voidModal');
+        m.classList.add('hidden');
+        m.classList.remove('flex');
+    }
+    async function submitVoid(){
+        const reason = (document.getElementById('voidReason').value || '').trim();
+        if(!reason){ alert('作废原因必填'); return; }
+        try{
+            await axios.post(`/api/transactions/${currentTxId}/void/?t=${Date.now()}`, { reason });
+            closeVoid();
+            await reloadAll(); // 全局联动刷新
+        }catch(e){
+            console.error(e);
+            alert('作废失败');
+        }
+    }
+
+    // ===== 更正 =====
+    function openCorrect(id){
+        currentTxId = id;
+        document.getElementById('correctAmount').value = '';
+        document.getElementById('correctNote').value = '';
+        const m = document.getElementById('correctModal');
+        m.classList.remove('hidden');
+        m.classList.add('flex');
+    }
+    function closeCorrect(){
+        currentTxId = null;
+        const m = document.getElementById('correctModal');
+        m.classList.add('hidden');
+        m.classList.remove('flex');
+    }
+    async function submitCorrect(){
+        const amt = (document.getElementById('correctAmount').value || '').trim();
+        const note = (document.getElementById('correctNote').value || '').trim();
+        if(!amt){ alert('正确金额必填'); return; }
+        if(!note){ alert('更正说明必填'); return; }
+        const num = Number(amt);
+        if(Number.isNaN(num)){ alert('金额格式不正确'); return; }
+
+        try{
+            await axios.post(`/api/transactions/${currentTxId}/correct/?t=${Date.now()}`, { amount: num, note });
+            closeCorrect();
+            await reloadAll(); // 全局联动刷新
+        }catch(e){
+            console.error(e);
+            alert('更正失败');
+        }
+    }
+
+    async function reloadAll(){
+        await loadAccounting();
+        await loadTx(1);
+    }
+
+    // 初次加载
+    reloadAll();
 </script>
+
 {% endblock %}

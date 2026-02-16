@@ -32,7 +32,39 @@ class RentalContractSerializer(serializers.ModelSerializer):
     class Meta: model = RentalContract; fields = '__all__'; read_only_fields = ['id', 'tenant']
 
 class TransactionSerializer(serializers.ModelSerializer):
-    class Meta: model = Transaction; fields = '__all__'; read_only_fields = ['id', 'tenant']
+    # ---- Readable / UI fields ----
+    contact_name = serializers.SerializerMethodField()
+    product_name = serializers.SerializerMethodField()
+    capital_account_name = serializers.SerializerMethodField()
+    type_display = serializers.SerializerMethodField()
+    status_display = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Transaction
+        fields = '__all__'  # IMPORTANT: do not reference non-existent fields (e.g. updated_at)
+
+    def get_contact_name(self, obj):
+        c = getattr(obj, 'contact', None)
+        return getattr(c, 'name', None) if c else None
+
+    def get_product_name(self, obj):
+        p = getattr(obj, 'product', None)
+        return getattr(p, 'name', None) if p else None
+
+    def get_capital_account_name(self, obj):
+        a = getattr(obj, 'capital_account', None)
+        return getattr(a, 'name', None) if a else None
+
+    def get_type_display(self, obj):
+        mapping = {'SALE': '销售', 'BUY': '采购', 'RENT': '租赁', 'OTHER': '其他'}
+        return mapping.get(getattr(obj, 'type', None), getattr(obj, 'type', ''))
+
+    def get_status_display(self, obj):
+        # is_voided is added by later migrations; keep compatible if DB already has it.
+        if getattr(obj, 'is_voided', False):
+            return '作废'
+        return '有效'
+
 
 class StockItemSerializer(serializers.ModelSerializer):
     product_name = serializers.CharField(source='product.name', read_only=True)

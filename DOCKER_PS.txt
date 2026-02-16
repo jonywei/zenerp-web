@@ -1,0 +1,3 @@
+NAME         IMAGE         COMMAND                  SERVICE   CREATED       STATUS             PORTS
+zenerp_db    postgres:15   "docker-entrypoint.s…"   db        4 weeks ago   Up 4 weeks         0.0.0.0:8667->5432/tcp, [::]:8667->5432/tcp
+zenerp_web   zenerp-web    "python manage.py ru…"   web       4 weeks ago   Up About an hour   0.0.0.0:8666->8000/tcp, [::]:8666->8000/tcp
