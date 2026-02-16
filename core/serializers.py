@@ -52,7 +52,7 @@ class TransactionSerializer(serializers.ModelSerializer):
         return getattr(p, 'name', None) if p else None
 
     def get_capital_account_name(self, obj):
-        a = getattr(obj, 'capital_account', None)
+        a = getattr(obj, 'account', None)
         return getattr(a, 'name', None) if a else None
 
     def get_type_display(self, obj):

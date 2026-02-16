@@ -149,7 +149,7 @@ class Transaction(TenantAwareModel):
 
     class Meta: verbose_name = "财务流水"; verbose_name_plural = verbose_name
 
-# 7. 序列号工厂 (补全)
+# 5. 序列号工厂 (补全)
 class SerialNumberFactory(TenantAwareModel):
     sn = models.CharField(max_length=100, verbose_name='序列号/IMEI')
     status = models.CharField(max_length=20, default='normal', verbose_name='状态')

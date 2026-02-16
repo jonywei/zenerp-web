@@ -95,13 +95,13 @@ AUTH_USER_MODEL = 'core.CustomUser'
 # --- 图片存储路径 (映射到腾讯云硬盘) ---
 MEDIA_URL = '/uploads/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'uploads')
-# --- SimpleUI 个性化配置 (修改为 zerp) ---
+# --- SimpleUI 个性化配置 (品牌统一为 ZenERP) ---
 SIMPLEUI_HOME_INFO = False  
 SIMPLEUI_ANALYSIS = False
 SIMPLEUI_DEFAULT_ICON = False
 
 # 🟢 1. 修改左侧菜单顶部的 Logo/文字
-SIMPLEUI_LOGO = 'ZenERP'   # 改为 zerp
+SIMPLEUI_LOGO = 'ZenERP'   # 保持与品牌名称一致
 SIMPLEUI_HOME_TITLE = 'ZenERP 工作台'
 SIMPLEUI_DEFAULT_THEME = 'admin.lte.css'
 
